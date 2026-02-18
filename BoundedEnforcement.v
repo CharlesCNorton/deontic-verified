@@ -392,7 +392,8 @@ Qed.
     (1) it is coherent (only bearers can violate),
     (2) enforcement is irreflexive (no self-punishment),
     (3) every severity cap is positive (enforcement is possible, not
-        vacuously prevented). *)
+        vacuously prevented),
+    (4) the population has no duplicate agents. *)
 
 Record consistent (ds : DeonticSystem) : Prop := mkConsistent {
   consistent_coherent     : coherent ds;
@@ -400,7 +401,8 @@ Record consistent (ds : DeonticSystem) : Prop := mkConsistent {
   consistent_caps_positive : forall a o,
     In a (agents ds) ->
     obligated ds a o = true ->
-    severity_cap ds o > 0
+    severity_cap ds o > 0;
+  consistent_nodup : NoDup (agents ds)
 }.
 
 (** Witness: the Homeworld system is consistent. *)
@@ -417,6 +419,10 @@ Proof.
       destruct (obligation_eqb_spec o treaty_no_hyperspace); subst.
       * simpl. lia.
       * simpl in Hobl. discriminate.
+  - unfold homeworld_system. simpl.
+    constructor.
+    + intros [H | []]. unfold taiidan, kushan in H. injection H. lia.
+    + constructor; [intros [] | constructor].
 Qed.
 
 (** Counterexample: a system with zero caps everywhere is not
@@ -432,7 +438,7 @@ Definition zero_cap_system : DeonticSystem := mkDeonticSystem
 
 Lemma zero_cap_not_consistent : ~ consistent zero_cap_system.
 Proof.
-  intros [_ _ Hcaps].
+  intros [_ _ Hcaps _].
   specialize (Hcaps kushan treaty_no_hyperspace).
   unfold zero_cap_system in Hcaps. simpl in Hcaps.
   assert (H : 0 > 0).
@@ -451,7 +457,7 @@ Theorem consistent_authorized_positive_cap :
     authorized ds pr ->
     severity_cap ds (cause pr) > 0.
 Proof.
-  intros ds pr [Hcoh Hirr Hcaps] Hauth.
+  intros ds pr [Hcoh Hirr Hcaps _] Hauth.
   destruct Hauth as [Hin_e [Hin_t [Henf [Hviol Hobl]]]].
   exact (Hcaps (target pr) (cause pr) Hin_t Hobl).
 Qed.
@@ -1601,6 +1607,14 @@ Proof.
     destruct (obligation_eqb_spec o trade_embargo); subst.
     + simpl. lia.
     + simpl in Hobl. discriminate.
+  - unfold embargo_system. simpl.
+    constructor.
+    + intros [H | [H | []]].
+      * unfold embargo_enforcer, embargo_violator in H. injection H. lia.
+      * unfold embargo_enforcer, embargo_observer in H. injection H. lia.
+    + constructor.
+      * intros [H | []]. unfold embargo_violator, embargo_observer in H. injection H. lia.
+      * constructor; [intros [] | constructor].
 Qed.
 
 Definition embargo_proportional := mkPunitiveResponse
