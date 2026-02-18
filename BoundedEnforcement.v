@@ -1881,7 +1881,7 @@ Definition modally_consistent (ns : NormativeStatus) : Prop :=
 Definition grounded (ds : DeonticSystem) (ns : NormativeStatus) : Prop :=
   (forall a o, ns a o = OBL -> obligated ds a o = true) /\
   (forall a o, ns a o = FORB ->
-    obligated ds a o = false \/ may_enforce ds a (mkAgent 0) = false).
+    obligated ds a o = false \/ forall b, may_enforce ds a b = false).
 
 (** Violation of a forbidden action is impossible in a grounded
     coherent system: if the action is forbidden, the agent doesn't
