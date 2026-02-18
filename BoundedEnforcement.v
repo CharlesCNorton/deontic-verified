@@ -3165,3 +3165,151 @@ Proof.
   - unfold due_process_satisfied, homeworld_rights_with_process,
            proportional_response. simpl. auto.
 Qed.
+
+(** * Epistemic Layer *)
+
+(** The base framework uses an omniscient [violated] predicate.
+    In practice, enforcement is conditioned on evidence.  This
+    section adds an evidence layer that mediates between the
+    objective world state and enforcement decisions. *)
+
+Inductive EvidenceStrength :=
+  | BeyondReasonableDoubt
+  | ClearAndConvincing
+  | PreponderanceOfEvidence
+  | NoEvidence.
+
+Definition evidence_rank (e : EvidenceStrength) : nat :=
+  match e with
+  | BeyondReasonableDoubt  => 3
+  | ClearAndConvincing     => 2
+  | PreponderanceOfEvidence => 1
+  | NoEvidence             => 0
+  end.
+
+(** An [EpistemicSystem] wraps a deontic system with an evidence
+    function and a burden-of-proof threshold per obligation. *)
+
+Record EpistemicSystem := mkEpistemicSystem {
+  es_base     : DeonticSystem;
+  es_evidence : Agent -> Obligation -> EvidenceStrength;
+  es_burden   : Obligation -> EvidenceStrength
+}.
+
+(** The burden is *met* when the available evidence is at least
+    as strong as the required burden. *)
+
+Definition burden_met (es : EpistemicSystem)
+  (a : Agent) (o : Obligation) : Prop :=
+  evidence_rank (es_evidence es a o) >=
+  evidence_rank (es_burden es o).
+
+(** An *epistemically valid* enforcement requires both base-system
+    lawfulness and sufficient evidence. *)
+
+Definition epistemically_valid (es : EpistemicSystem)
+  (pr : PunitiveResponse) : Prop :=
+  lawful (es_base es) pr /\
+  burden_met es (target pr) (cause pr).
+
+(** Enforcement without sufficient evidence is invalid. *)
+
+Theorem insufficient_evidence_invalid :
+  forall es pr,
+    ~ burden_met es (target pr) (cause pr) ->
+    ~ epistemically_valid es pr.
+Proof.
+  intros es pr Hinsuff [_ Hmet]. exact (Hinsuff Hmet).
+Qed.
+
+(** Epistemically valid enforcement is still bounded. *)
+
+Theorem epistemic_enforcement_bounded :
+  forall es pr,
+    epistemically_valid es pr ->
+    severity pr <= severity_cap (es_base es) (cause pr).
+Proof.
+  intros es pr [Hlaw _].
+  exact (lawful_bounded (es_base es) pr Hlaw).
+Qed.
+
+(** Soundness: if the evidence is sound (all evidence of violation
+    corresponds to actual violation), then epistemic enforcement
+    targets actual violators. *)
+
+Definition evidence_sound (es : EpistemicSystem) : Prop :=
+  forall a o,
+    evidence_rank (es_evidence es a o) > 0 ->
+    violated (es_base es) a o = true.
+
+Theorem sound_epistemic_targets_violators :
+  forall es pr,
+    evidence_sound es ->
+    epistemically_valid es pr ->
+    violated (es_base es) (target pr) (cause pr) = true.
+Proof.
+  intros es pr Hsound [Hlaw _].
+  destruct Hlaw as [_ _ _ Hviol _ _]. exact Hviol.
+Qed.
+
+(** Witness: Taiidan has beyond-reasonable-doubt evidence of Kushan's
+    hyperspace violation.  The burden is beyond-reasonable-doubt. *)
+
+Definition homeworld_epistemic := mkEpistemicSystem
+  homeworld_system
+  (fun a o =>
+    if agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace
+    then BeyondReasonableDoubt else NoEvidence)
+  (fun _ => BeyondReasonableDoubt).
+
+Lemma kushan_evidence_sufficient :
+  burden_met homeworld_epistemic kushan treaty_no_hyperspace.
+Proof.
+  unfold burden_met, homeworld_epistemic. simpl. lia.
+Qed.
+
+Lemma taiidan_no_evidence :
+  ~ burden_met homeworld_epistemic taiidan treaty_no_hyperspace.
+Proof.
+  unfold burden_met, homeworld_epistemic. simpl. lia.
+Qed.
+
+(** Enforcement against Kushan is epistemically valid. *)
+
+Lemma kushan_epistemic_enforcement :
+  epistemically_valid homeworld_epistemic proportional_response.
+Proof.
+  split.
+  - exact proportional_lawful.
+  - exact kushan_evidence_sufficient.
+Qed.
+
+(** Lowering the burden permits enforcement on weaker evidence. *)
+
+Definition low_burden_epistemic := mkEpistemicSystem
+  homeworld_system
+  (fun a o =>
+    if agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace
+    then PreponderanceOfEvidence else NoEvidence)
+  (fun _ => PreponderanceOfEvidence).
+
+Lemma low_burden_sufficient :
+  burden_met low_burden_epistemic kushan treaty_no_hyperspace.
+Proof.
+  unfold burden_met, low_burden_epistemic. simpl. lia.
+Qed.
+
+(** The same evidence fails a higher burden. *)
+
+Definition high_burden_same_evidence := mkEpistemicSystem
+  homeworld_system
+  (fun a o =>
+    if agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace
+    then PreponderanceOfEvidence else NoEvidence)
+  (fun _ => BeyondReasonableDoubt).
+
+Lemma high_burden_fails :
+  ~ burden_met high_burden_same_evidence kushan treaty_no_hyperspace.
+Proof.
+  unfold burden_met, high_burden_same_evidence. simpl. lia.
+Qed.
