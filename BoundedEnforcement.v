@@ -2532,3 +2532,125 @@ Proof.
   unfold graded_lawful, homeworld_graded, effective_cap. simpl.
   intros [_ [_ [_ [Hviol _]]]]. discriminate.
 Qed.
+
+(** * Contrary-to-Duty Obligations *)
+
+(** A contrary-to-duty (CTD) obligation is a second-order norm
+    triggered by the violation of a primary obligation:
+    "if you violate A, you must do B."
+
+    Classic example (Chisholm): you ought not steal; but if you do
+    steal, you ought to return the goods.  In Homeworld terms:
+    Kushan ought not develop hyperspace; but if they do, they must
+    submit to inspection. *)
+
+Record CTDObligation := mkCTDObligation {
+  ctd_primary   : Obligation;
+  ctd_secondary : Obligation;
+  ctd_agent     : Agent
+}.
+
+(** A CTD obligation is *triggered* when the agent has violated the
+    primary obligation. *)
+
+Definition ctd_triggered (ds : DeonticSystem) (ctd : CTDObligation) : Prop :=
+  violated ds (ctd_agent ctd) (ctd_primary ctd) = true.
+
+(** A CTD obligation is *satisfied* when, upon triggering, the agent
+    bears and has not violated the secondary obligation. *)
+
+Definition ctd_satisfied (ds : DeonticSystem) (ctd : CTDObligation) : Prop :=
+  ctd_triggered ds ctd ->
+  obligated ds (ctd_agent ctd) (ctd_secondary ctd) = true /\
+  violated ds (ctd_agent ctd) (ctd_secondary ctd) = false.
+
+(** A CTD obligation is *doubly violated* when the agent violates
+    both the primary and secondary obligations. *)
+
+Definition ctd_doubly_violated (ds : DeonticSystem) (ctd : CTDObligation) : Prop :=
+  violated ds (ctd_agent ctd) (ctd_primary ctd) = true /\
+  violated ds (ctd_agent ctd) (ctd_secondary ctd) = true.
+
+(** When a CTD is doubly violated, the total lawful punishment
+    across both obligations is bounded by the sum of their caps. *)
+
+Theorem ctd_double_violation_bound :
+  forall ds ctd pr_primary pr_secondary,
+    ctd_doubly_violated ds ctd ->
+    lawful ds pr_primary ->
+    cause pr_primary = ctd_primary ctd ->
+    lawful ds pr_secondary ->
+    cause pr_secondary = ctd_secondary ctd ->
+    severity pr_primary + severity pr_secondary <=
+      severity_cap ds (ctd_primary ctd) +
+      severity_cap ds (ctd_secondary ctd).
+Proof.
+  intros ds ctd pr1 pr2 _ Hlaw1 Hc1 Hlaw2 Hc2.
+  assert (H1 := lawful_bounded ds pr1 Hlaw1).
+  assert (H2 := lawful_bounded ds pr2 Hlaw2).
+  unfold bounded in *. rewrite Hc1 in H1. rewrite Hc2 in H2. lia.
+Qed.
+
+(** Witness: Kushan must not develop hyperspace (treaty_no_hyperspace).
+    If they do, they must submit to inspection (treaty_tribute,
+    repurposed as the inspection obligation).  The system models
+    both obligations with distinct caps. *)
+
+Definition hyperspace_ctd := mkCTDObligation
+  treaty_no_hyperspace treaty_tribute kushan.
+
+(** In the homeworld system, the CTD is triggered because Kushan
+    violated the hyperspace treaty. *)
+
+Lemma hyperspace_ctd_triggered :
+  ctd_triggered homeworld_system hyperspace_ctd.
+Proof.
+  unfold ctd_triggered, homeworld_system, hyperspace_ctd. simpl. reflexivity.
+Qed.
+
+(** The CTD secondary (inspection) has cap 0 in the homeworld system,
+    so the total bound for double violation is 10 + 0 = 10 —
+    the CTD secondary adds no additional punishment authority. *)
+
+Lemma hyperspace_ctd_bound_value :
+  severity_cap homeworld_system (ctd_primary hyperspace_ctd) +
+  severity_cap homeworld_system (ctd_secondary hyperspace_ctd) = 10.
+Proof.
+  unfold homeworld_system, hyperspace_ctd. simpl. reflexivity.
+Qed.
+
+(** A [CTDSystem] extends a deontic system with a list of CTD
+    obligations and a well-formedness condition: the secondary
+    obligation must be distinct from the primary. *)
+
+Record CTDSystem := mkCTDSystem {
+  ctds_base  : DeonticSystem;
+  ctds_rules : list CTDObligation;
+  ctds_distinct : forall ctd,
+    In ctd ctds_rules ->
+    ctd_primary ctd <> ctd_secondary ctd
+}.
+
+(** In a CTD system, the secondary obligation becomes enforceable
+    only upon violation of the primary.  This is not built into the
+    base DeonticSystem (which is a snapshot), so we express it as a
+    property of the CTD rule + system state. *)
+
+Definition ctd_enforcement_valid
+  (cs : CTDSystem) (ctd : CTDObligation) (pr : PunitiveResponse) : Prop :=
+  In ctd (ctds_rules cs) /\
+  ctd_triggered (ctds_base cs) ctd /\
+  cause pr = ctd_secondary ctd /\
+  lawful (ctds_base cs) pr.
+
+(** CTD enforcement is still bounded by the secondary cap. *)
+
+Theorem ctd_enforcement_bounded :
+  forall cs ctd pr,
+    ctd_enforcement_valid cs ctd pr ->
+    severity pr <= severity_cap (ctds_base cs) (ctd_secondary ctd).
+Proof.
+  intros cs ctd pr [_ [_ [Hcause Hlaw]]].
+  assert (Hbnd := lawful_bounded (ctds_base cs) pr Hlaw).
+  unfold bounded in Hbnd. rewrite Hcause in Hbnd. exact Hbnd.
+Qed.
