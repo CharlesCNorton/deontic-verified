@@ -23,7 +23,20 @@ Require Import Arith.
 Require Import List.
 Require Import Lia.
 Require Import Bool.
+Require Import Extraction.
 Import ListNotations.
+
+(** Automation for the recurring unfold/simpl/destruct/lia pattern. *)
+
+Ltac deontic_crush :=
+  repeat match goal with
+  | [ |- _ /\ _ ] => split
+  | [ H : _ /\ _ |- _ ] => destruct H
+  | [ H : _ \/ _ |- _ ] => destruct H
+  | [ H : exists _, _ |- _ ] => destruct H
+  | [ H : In _ [] |- _ ] => destruct H
+  | [ H : In _ (_ :: _) |- _ ] => destruct H; [subst |]
+  end; simpl in *; try discriminate; try lia; auto.
 
 (** * Carrier Types *)
 
@@ -3767,3 +3780,17 @@ Proof.
     specialize (Hirr (target pr)).
     rewrite Henf in Hirr. discriminate.
 Qed.
+
+(** * Extraction *)
+
+(** Extract the Boolean decision procedures to OCaml. *)
+
+Extraction Language OCaml.
+Extract Inductive bool => "bool" ["true" "false"].
+Extract Inductive nat => "int" ["0" "(fun n -> n + 1)"]
+  "(fun fO fS n -> if n = 0 then fO () else fS (n - 1))".
+Extract Inductive list => "list" ["[]" "(::)"].
+
+Extraction "BoundedEnforcement"
+  lawfulb authorizedb boundedb
+  agent_eqb obligation_eqb.
