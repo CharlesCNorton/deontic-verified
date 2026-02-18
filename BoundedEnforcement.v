@@ -1880,8 +1880,7 @@ Definition modally_consistent (ns : NormativeStatus) : Prop :=
 
 Definition grounded (ds : DeonticSystem) (ns : NormativeStatus) : Prop :=
   (forall a o, ns a o = OBL -> obligated ds a o = true) /\
-  (forall a o, ns a o = FORB ->
-    obligated ds a o = false \/ forall b, may_enforce ds a b = false).
+  (forall a o, ns a o = FORB -> obligated ds a o = false).
 
 (** Violation of a forbidden action is impossible in a grounded
     coherent system: if the action is forbidden, the agent doesn't
@@ -1892,10 +1891,10 @@ Theorem forbidden_no_violation :
     grounded ds ns ->
     coherent ds ->
     ns a o = FORB ->
-    obligated ds a o = false ->
     violated ds a o = false.
 Proof.
-  intros ds ns a o [_ Hforb] [Hcoh _] Hns Hobl.
+  intros ds ns a o [_ Hforb] [Hcoh _] Hns.
+  assert (Hobl : obligated ds a o = false) by (apply Hforb; exact Hns).
   destruct (violated ds a o) eqn:Hviol.
   - apply Hcoh in Hviol. rewrite Hviol in Hobl. discriminate.
   - reflexivity.
