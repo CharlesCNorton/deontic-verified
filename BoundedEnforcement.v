@@ -2654,3 +2654,129 @@ Proof.
   assert (Hbnd := lawful_bounded (ctds_base cs) pr Hlaw).
   unfold bounded in Hbnd. rewrite Hcause in Hbnd. exact Hbnd.
 Qed.
+
+(** * Normative Conflict *)
+
+(** Two obligations *conflict* for an agent when complying with one
+    entails violating the other. *)
+
+Record NormConflict := mkNormConflict {
+  nc_agent : Agent;
+  nc_obl1  : Obligation;
+  nc_obl2  : Obligation
+}.
+
+(** A conflict is genuine when both obligations are borne by the
+    agent and the agent has violated at least one. *)
+
+Definition genuine_conflict (ds : DeonticSystem) (nc : NormConflict) : Prop :=
+  obligated ds (nc_agent nc) (nc_obl1 nc) = true /\
+  obligated ds (nc_agent nc) (nc_obl2 nc) = true /\
+  (violated ds (nc_agent nc) (nc_obl1 nc) = true \/
+   violated ds (nc_agent nc) (nc_obl2 nc) = true).
+
+(** A [ConflictResolution] assigns a priority to each obligation.
+    When two obligations conflict, only violation of the
+    higher-priority obligation is enforceable; the lower-priority
+    violation is excused. *)
+
+Record ConflictResolution := mkConflictResolution {
+  cr_base      : DeonticSystem;
+  cr_conflicts : list NormConflict;
+  cr_priority  : Obligation -> nat;
+  cr_distinct  : forall nc,
+    In nc cr_conflicts ->
+    nc_obl1 nc <> nc_obl2 nc
+}.
+
+(** An obligation is *excused* when it conflicts with a
+    higher-priority obligation. *)
+
+Definition excused (cr : ConflictResolution)
+  (a : Agent) (o : Obligation) : Prop :=
+  exists nc,
+    In nc (cr_conflicts cr) /\
+    nc_agent nc = a /\
+    ((nc_obl1 nc = o /\
+      cr_priority cr (nc_obl2 nc) > cr_priority cr o) \/
+     (nc_obl2 nc = o /\
+      cr_priority cr (nc_obl1 nc) > cr_priority cr o)).
+
+(** An enforcement is *conflict-valid* when the targeted obligation
+    is not excused. *)
+
+Definition conflict_valid_enforcement
+  (cr : ConflictResolution) (pr : PunitiveResponse) : Prop :=
+  lawful (cr_base cr) pr /\
+  ~ excused cr (target pr) (cause pr).
+
+(** Enforcement of an excused obligation is invalid. *)
+
+Theorem excused_blocks_enforcement :
+  forall cr pr,
+    excused cr (target pr) (cause pr) ->
+    ~ conflict_valid_enforcement cr pr.
+Proof.
+  intros cr pr Hexc [_ Hnexc]. exact (Hnexc Hexc).
+Qed.
+
+(** Conflict-valid enforcement is still bounded. *)
+
+Theorem conflict_valid_bounded :
+  forall cr pr,
+    conflict_valid_enforcement cr pr ->
+    severity pr <= severity_cap (cr_base cr) (cause pr).
+Proof.
+  intros cr pr [Hlaw _].
+  exact (lawful_bounded (cr_base cr) pr Hlaw).
+Qed.
+
+(** Witness: Kushan bears hyperspace (priority 1) and tribute
+    (priority 2).  They conflict.  The lower-priority obligation
+    (hyperspace) is excused; the higher-priority (tribute) is not. *)
+
+Definition hw_conflict := mkNormConflict
+  kushan treaty_no_hyperspace treaty_tribute.
+
+Lemma hw_conflict_distinct :
+  forall nc, In nc [hw_conflict] -> nc_obl1 nc <> nc_obl2 nc.
+Proof.
+  intros nc [H | []]. subst. simpl. exact obligations_distinct.
+Qed.
+
+Definition homeworld_cr := mkConflictResolution
+  homeworld_system
+  [hw_conflict]
+  (fun o =>
+    if obligation_eqb o treaty_no_hyperspace then 1
+    else if obligation_eqb o treaty_tribute then 2
+    else 0)
+  hw_conflict_distinct.
+
+(** Hyperspace (priority 1) is excused by tribute (priority 2). *)
+
+Lemma hyperspace_excused :
+  excused homeworld_cr kushan treaty_no_hyperspace.
+Proof.
+  exists hw_conflict. split.
+  - left. reflexivity.
+  - split.
+    + reflexivity.
+    + left. split.
+      * reflexivity.
+      * unfold homeworld_cr. simpl. lia.
+Qed.
+
+(** Tribute (priority 2) is NOT excused — it is the higher-priority
+    obligation. *)
+
+Lemma tribute_not_excused :
+  ~ excused homeworld_cr kushan treaty_tribute.
+Proof.
+  intros [nc [Hin [Hagent Hpri]]].
+  destruct Hin as [H | []]. subst. simpl in *.
+  destruct Hpri as [[Hobl Hgt] | [Hobl Hgt]].
+  - unfold treaty_no_hyperspace, treaty_tribute in Hobl.
+    injection Hobl. lia.
+  - unfold homeworld_cr in Hgt. simpl in Hgt. lia.
+Qed.
