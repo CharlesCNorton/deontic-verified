@@ -1712,6 +1712,155 @@ Proof.
     simpl in Hlaw. lia.
 Qed.
 
+(** * Structural Counterexamples and Witnesses *)
+
+(** A system where an agent can enforce against itself violates
+    irreflexive enforcement and is therefore not consistent. *)
+
+Definition self_enforce_system : DeonticSystem := mkDeonticSystem
+  [kushan]
+  (fun a o =>
+    agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace)
+  (fun a o =>
+    agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace)
+  (fun enforcer target =>
+    agent_eqb enforcer kushan && agent_eqb target kushan)
+  (fun o =>
+    if obligation_eqb o treaty_no_hyperspace then 10 else 0).
+
+Lemma self_enforce_not_consistent : ~ consistent self_enforce_system.
+Proof.
+  intros [_ Hirr _ _].
+  specialize (Hirr kushan).
+  unfold self_enforce_system in Hirr. simpl in Hirr. discriminate.
+Qed.
+
+(** A cyclic delegation (A delegates to B, B delegates to A) is not
+    acyclic and therefore not well-formed. *)
+
+Definition cyclic_delegation : DelegationSystem := mkDelegationSystem
+  homeworld_system
+  (fun delegator delegate =>
+    (agent_eqb delegator taiidan && agent_eqb delegate turanic) ||
+    (agent_eqb delegator turanic && agent_eqb delegate taiidan))
+  (fun _ _ _ => 5).
+
+Lemma cyclic_delegation_not_acyclic : ~ acyclic cyclic_delegation.
+Proof.
+  intros Hacyclic.
+  apply (Hacyclic taiidan).
+  apply (reach_trans cyclic_delegation taiidan turanic taiidan).
+  - unfold cyclic_delegation. simpl. reflexivity.
+  - apply reach_step. unfold cyclic_delegation. simpl. reflexivity.
+Qed.
+
+Lemma cyclic_delegation_not_well_formed : ~ well_formed_delegation cyclic_delegation.
+Proof.
+  intros [_ _ Hacyclic].
+  exact (cyclic_delegation_not_acyclic Hacyclic).
+Qed.
+
+(** A branching delegation: Taiidan delegates independently to both
+    Turanic and Kadeshi with different caps.  This is well-formed
+    (acyclic, cap-monotone) and exercises the framework with a
+    non-linear delegation graph. *)
+
+Definition branching_delegation : DelegationSystem := mkDelegationSystem
+  homeworld_system
+  (fun delegator delegate =>
+    agent_eqb delegator taiidan &&
+    (agent_eqb delegate turanic || agent_eqb delegate kadeshi))
+  (fun delegator delegate obl =>
+    if agent_eqb delegator taiidan && obligation_eqb obl treaty_no_hyperspace then
+      if agent_eqb delegate turanic then 7
+      else if agent_eqb delegate kadeshi then 3
+      else 0
+    else 0).
+
+Lemma branching_delegation_cap_monotone :
+  cap_monotone branching_delegation.
+Proof.
+  intros delegator delegate obl Hdel.
+  unfold branching_delegation, homeworld_system in *. simpl in *.
+  destruct (agent_eqb_spec delegator taiidan); subst; simpl in *;
+    [| discriminate].
+  rewrite Bool.orb_true_iff in Hdel.
+  destruct (obligation_eqb_spec obl treaty_no_hyperspace); subst; simpl.
+  - destruct Hdel as [Hdel | Hdel];
+    destruct (agent_eqb_spec delegate turanic);
+    destruct (agent_eqb_spec delegate kadeshi);
+    subst; simpl in *; try discriminate; try lia.
+  - destruct Hdel as [Hdel | Hdel];
+    destruct (agent_eqb_spec delegate turanic);
+    destruct (agent_eqb_spec delegate kadeshi);
+    subst; simpl in *; try discriminate; try lia.
+Qed.
+
+Lemma branching_delegates_to_shape :
+  forall a b,
+    delegates_to branching_delegation a b = true ->
+    a = taiidan /\ (b = turanic \/ b = kadeshi).
+Proof.
+  intros a b H.
+  unfold branching_delegation in H. simpl in H.
+  destruct (agent_eqb_spec a taiidan); subst; simpl in *; [| discriminate].
+  rewrite Bool.orb_true_iff in H.
+  destruct H as [H | H].
+  - destruct (agent_eqb_spec b turanic); subst; [auto | discriminate].
+  - destruct (agent_eqb_spec b kadeshi); subst; [auto | discriminate].
+Qed.
+
+Lemma branching_reachable_target :
+  forall a b,
+    reachable branching_delegation a b ->
+    b = turanic \/ b = kadeshi.
+Proof.
+  intros a b H.
+  induction H as [a' b' Hdel | a' b' c Hdel _ IH].
+  - destruct (branching_delegates_to_shape a' b' Hdel). assumption.
+  - exact IH.
+Qed.
+
+Lemma branching_reachable_source :
+  forall a b,
+    reachable branching_delegation a b ->
+    a = taiidan.
+Proof.
+  intros a b H.
+  induction H as [a' b' Hdel | a' b' c Hdel _ IH].
+  - destruct (branching_delegates_to_shape a' b' Hdel). assumption.
+  - destruct (branching_delegates_to_shape a' b' Hdel). assumption.
+Qed.
+
+Lemma branching_delegation_acyclic : acyclic branching_delegation.
+Proof.
+  intros a Hreach.
+  assert (H1 := branching_reachable_source a a Hreach).
+  assert (H2 := branching_reachable_target a a Hreach).
+  subst. destruct H2 as [H | H];
+    unfold taiidan, turanic, kadeshi in H; injection H; lia.
+Qed.
+
+Lemma branching_delegation_well_formed :
+  well_formed_delegation branching_delegation.
+Proof.
+  constructor.
+  - exact homeworld_consistent.
+  - exact branching_delegation_cap_monotone.
+  - exact branching_delegation_acyclic.
+Qed.
+
+(** The two branches have distinct caps: Turanic gets 7, Kadeshi gets 3,
+    both bounded by the base cap of 10. *)
+Lemma branching_caps_distinct :
+  delegate_cap branching_delegation taiidan turanic treaty_no_hyperspace = 7 /\
+  delegate_cap branching_delegation taiidan kadeshi treaty_no_hyperspace = 3 /\
+  delegate_cap branching_delegation taiidan turanic treaty_no_hyperspace <>
+  delegate_cap branching_delegation taiidan kadeshi treaty_no_hyperspace.
+Proof.
+  unfold branching_delegation. simpl. repeat split. lia.
+Qed.
+
 (** * Decision Procedures *)
 
 (** Computable classifiers for authorization, boundedness, and
