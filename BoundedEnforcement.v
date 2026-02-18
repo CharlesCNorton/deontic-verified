@@ -315,9 +315,8 @@ Proof.
     simpl in Hbnd. lia.
 Qed.
 
-(** This is the crux: having enforcement authority (authorization)
-    does NOT entail having lawful power to impose arbitrary severity.
-    The Taiidan had standing — but extermination was still unlawful. *)
+(** Authorization does not entail lawful power to impose arbitrary
+    severity. *)
 
 Lemma authorization_insufficient :
   exists ds pr,
@@ -782,10 +781,7 @@ Proof.
   exact (Hmono pred a obl Hpred).
 Qed.
 
-(** This is genuinely non-trivial: it does not matter HOW MANY hops
-    the chain has — the bound never exceeds the original cap.
-
-    Witness: a 3-hop chain Taiidan -> Turanic -> agent 3. *)
+(** Witness: a 3-hop chain Taiidan -> Turanic -> agent 3. *)
 
 Definition kadeshi := mkAgent 3.
 
@@ -1089,29 +1085,16 @@ Proof.
   unfold three_strikes_system, strike1, strike2, strike3. simpl. lia.
 Qed.
 
-(** In such a system, the per-violation cap for the 3rd strike (50) is
-    not bounded by 3 * max_single_cap (3 * 5 = 15).  This is exactly
-    the kind of escalation that linearity prohibits: the punishment for
-    a third violation should not exceed three times the single-violation
-    cap. *)
+(** The 3rd-strike cap (50) exceeds 3 * max_single_cap (15),
+    violating linear proportionality. *)
 
-(** * Grand Synthesis: The Bounded Enforcement Theorem *)
+(** * Combined Bounded Enforcement Theorem *)
 
-(** We now combine all the pieces into a single comprehensive
-    statement about deontic enforcement systems.
-
-    For any deontic system, any target agent, any obligation, any
-    set of enforcers, and any set of responses:
+(** Combined statement for any deontic system:
 
     (1) Every individual lawful response has severity <= cap.
     (2) The aggregate lawful severity from [n] enforcers is <= n * cap.
-    (3) No authorized-but-unbounded response is lawful.
-    (4) In a delegation hierarchy, no delegate's cap exceeds the
-        original cap.
-    (5) Enforcement outside the temporal window is invalid.
-
-    Together, these close every avenue by which a single obligation
-    violation could generate unbounded punishment. *)
+    (3) No authorized-but-unbounded response is lawful. *)
 
 Theorem bounded_enforcement_synthesis :
   forall ds,
@@ -1169,19 +1152,9 @@ Qed.
 
 (** * The Kharak Theorem *)
 
-(** The formal statement of the file header's claim, combining all
-    elements.  Applied to the Homeworld scenario:
-
-    The Taiidan had enforcement authority over the Kushan for the
-    hyperspace treaty.  The Kushan violated the treaty.  But the
-    severity cap was 10.  The extermination (severity 100) was:
-    - authorized (the Taiidan had standing),
-    - unbounded (100 > 10),
-    - therefore unlawful.
-
-    No rearrangement of the enforcement — delegation to proxies,
-    aggregation of enforcers, temporal manipulation — can make it
-    lawful. *)
+(** Instantiation: the extermination of Kharak (severity 100) was
+    authorized (Taiidan had standing) and unbounded (100 > cap 10),
+    therefore unlawful. *)
 
 Theorem kharak_theorem :
   authorized homeworld_system extermination_response /\
