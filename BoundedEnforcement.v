@@ -114,10 +114,18 @@ Record DeonticSystem := mkDeonticSystem {
   severity_cap : Obligation -> Severity
 }.
 
-(** Coherence: you can only violate an obligation you actually bear. *)
+(** Coherence:
+    (1) you can only violate an obligation you actually bear,
+    (2) enforcement authority only holds between population members,
+    (3) obligations with nonzero caps have at least one bearer. *)
 Definition coherent (ds : DeonticSystem) : Prop :=
-  forall a o,
-    violated ds a o = true -> obligated ds a o = true.
+  (forall a o,
+    violated ds a o = true -> obligated ds a o = true) /\
+  (forall a b,
+    may_enforce ds a b = true -> In a (agents ds) /\ In b (agents ds)) /\
+  (forall o,
+    severity_cap ds o > 0 ->
+    exists a, In a (agents ds) /\ obligated ds a o = true).
 
 (** Non-reflexive enforcement: no agent may punish itself. *)
 Definition irreflexive_enforcement (ds : DeonticSystem) : Prop :=
@@ -143,8 +151,20 @@ Definition homeworld_system : DeonticSystem := mkDeonticSystem
 (** The witness system is coherent. *)
 Lemma homeworld_coherent : coherent homeworld_system.
 Proof.
-  unfold coherent, homeworld_system. simpl.
-  intros a o H. exact H.
+  split; [| split].
+  - intros a o H. exact H.
+  - intros a b H.
+    unfold homeworld_system in H. simpl in H.
+    destruct (agent_eqb_spec a taiidan); destruct (agent_eqb_spec b kushan);
+      subst; simpl in *; try discriminate.
+    split; [left; reflexivity | right; left; reflexivity].
+  - intros o Hcap.
+    unfold homeworld_system in *. simpl in *.
+    destruct (obligation_eqb_spec o treaty_no_hyperspace); subst.
+    + exists kushan. simpl. split.
+      * right. left. reflexivity.
+      * reflexivity.
+    + simpl in Hcap. lia.
 Qed.
 
 (** The witness system has irreflexive enforcement. *)
@@ -169,7 +189,7 @@ Definition incoherent_system : DeonticSystem := mkDeonticSystem
 Lemma incoherent_system_not_coherent : ~ coherent incoherent_system.
 Proof.
   unfold coherent, incoherent_system. simpl.
-  intros H.
+  intros [H _].
   specialize (H kushan treaty_no_hyperspace).
   simpl in H.
   discriminate H.
@@ -190,11 +210,14 @@ Record PunitiveResponse := mkPunitiveResponse {
 }.
 
 (** A response is *authorized* when:
-    (1) the enforcer may enforce against the target,
-    (2) the target actually violated the obligation,
-    (3) the target bore the obligation. *)
+    (1) both agents are in the population,
+    (2) the enforcer may enforce against the target,
+    (3) the target actually violated the obligation,
+    (4) the target bore the obligation. *)
 
 Definition authorized (ds : DeonticSystem) (pr : PunitiveResponse) : Prop :=
+  In (enforcer pr) (agents ds) /\
+  In (target pr) (agents ds) /\
   may_enforce ds (enforcer pr) (target pr) = true /\
   violated ds (target pr) (cause pr) = true /\
   obligated ds (target pr) (cause pr) = true.
@@ -238,7 +261,7 @@ Lemma proportional_authorized :
   authorized homeworld_system proportional_response.
 Proof.
   unfold authorized, homeworld_system, proportional_response. simpl.
-  auto.
+  repeat split; auto.
 Qed.
 
 Lemma proportional_bounded :
@@ -258,7 +281,7 @@ Lemma extermination_authorized :
   authorized homeworld_system extermination_response.
 Proof.
   unfold authorized, homeworld_system, extermination_response. simpl.
-  auto.
+  repeat split; auto.
 Qed.
 
 Lemma extermination_unbounded :
@@ -279,7 +302,7 @@ Lemma unauthorized_example :
   ~ authorized homeworld_system unauthorized_response.
 Proof.
   unfold authorized, homeworld_system, unauthorized_response. simpl.
-  intros [H _]. discriminate.
+  intros [_ [_ [H _]]]. discriminate.
 Qed.
 
 (** * Lawful Response *)
@@ -345,8 +368,9 @@ Qed.
 Record consistent (ds : DeonticSystem) : Prop := mkConsistent {
   consistent_coherent     : coherent ds;
   consistent_irreflexive  : irreflexive_enforcement ds;
-  consistent_caps_positive : forall o,
-    obligated ds (hd taiidan (agents ds)) o = true ->
+  consistent_caps_positive : forall a o,
+    In a (agents ds) ->
+    obligated ds a o = true ->
     severity_cap ds o > 0
 }.
 
@@ -356,9 +380,14 @@ Proof.
   constructor.
   - exact homeworld_coherent.
   - exact homeworld_irreflexive.
-  - intros o. unfold homeworld_system. simpl.
-    unfold agent_eqb, obligation_eqb. simpl.
-    intros H. discriminate.
+  - intros a o Hin Hobl.
+    unfold homeworld_system in *. simpl in *.
+    destruct Hin as [Ha | [Ha | []]]; subst; simpl in Hobl.
+    + discriminate.
+    + unfold agent_eqb in Hobl. simpl in Hobl.
+      destruct (obligation_eqb_spec o treaty_no_hyperspace); subst.
+      * simpl. lia.
+      * simpl in Hobl. discriminate.
 Qed.
 
 (** Counterexample: a system with zero caps everywhere is not
@@ -375,10 +404,27 @@ Definition zero_cap_system : DeonticSystem := mkDeonticSystem
 Lemma zero_cap_not_consistent : ~ consistent zero_cap_system.
 Proof.
   intros [_ _ Hcaps].
-  specialize (Hcaps treaty_no_hyperspace).
+  specialize (Hcaps kushan treaty_no_hyperspace).
   unfold zero_cap_system in Hcaps. simpl in Hcaps.
-  assert (H : 0 > 0) by (apply Hcaps; reflexivity).
+  assert (H : 0 > 0).
+  { apply Hcaps.
+    - left. reflexivity.
+    - reflexivity. }
   lia.
+Qed.
+
+(** In a consistent system, every authorized response targets a
+    violation with a positive severity cap. *)
+
+Theorem consistent_authorized_positive_cap :
+  forall ds pr,
+    consistent ds ->
+    authorized ds pr ->
+    severity_cap ds (cause pr) > 0.
+Proof.
+  intros ds pr [Hcoh Hirr Hcaps] Hauth.
+  destruct Hauth as [Hin_e [Hin_t [Henf [Hviol Hobl]]]].
+  exact (Hcaps (target pr) (cause pr) Hin_t Hobl).
 Qed.
 
 (** * Per-Response Bound *)
@@ -405,7 +451,8 @@ Lemma maximal_response_lawful :
   lawful homeworld_system maximal_response.
 Proof.
   split.
-  - unfold authorized, homeworld_system, maximal_response. simpl. auto.
+  - unfold authorized, homeworld_system, maximal_response. simpl.
+    repeat split; auto.
   - unfold bounded, homeworld_system, maximal_response. simpl. lia.
 Qed.
 
@@ -541,15 +588,6 @@ Proof.
   exact proportional_lawful.
 Qed.
 
-(** Contrapositive: if a response is authorized and lawful, it is
-    bounded. *)
-Corollary lawful_implies_bounded :
-  forall ds pr,
-    lawful ds pr -> bounded ds pr.
-Proof.
-  intros ds pr [_ Hbnd]. exact Hbnd.
-Qed.
-
 (** Instantiation: the extermination of Kharak. *)
 Corollary kharak_extermination_unlawful :
   ~ lawful homeworld_system extermination_response.
@@ -594,32 +632,43 @@ Qed.
 (** In hierarchical enforcement regimes, authority may be delegated:
     agent A grants agent B the right to punish on A's behalf.
     Delegation must not amplify the severity cap — a delegate cannot
-    impose harsher punishment than the delegator was entitled to. *)
+    impose harsher punishment than the delegator was entitled to.
+
+    [delegate_cap] is indexed by the delegation pair (delegator,
+    delegate), not just the delegate. This allows distinct delegators
+    to grant different caps to the same delegate. *)
 
 Record DelegationSystem := mkDelegationSystem {
   ds_base      : DeonticSystem;
   delegates_to : Agent -> Agent -> bool;
-  delegate_cap : Agent -> Obligation -> Severity
+  delegate_cap : Agent -> Agent -> Obligation -> Severity
 }.
 
 (** A delegation system is *cap-monotone* when every delegate's cap
-    is at most the base system's cap.  This is the no-amplification
-    invariant. *)
+    from a given delegator does not exceed that delegator's own cap.
+    For the root (an agent with base-system enforcement authority),
+    the cap is [severity_cap (ds_base del)]. *)
 
 Definition cap_monotone (del : DelegationSystem) : Prop :=
   forall delegator delegate obl,
     delegates_to del delegator delegate = true ->
-    delegate_cap del delegate obl <= severity_cap (ds_base del) obl.
+    delegate_cap del delegator delegate obl <=
+      severity_cap (ds_base del) obl.
 
-(** A delegation system is *acyclic* when delegation does not
-    circularly return authority to the delegator. We model this
-    with the requirement that there is no pair where A delegates
-    to B and B delegates to A. *)
+(** Reachability in the delegation graph. *)
 
-Definition no_mutual_delegation (del : DelegationSystem) : Prop :=
-  forall a b,
-    delegates_to del a b = true ->
-    delegates_to del b a = false.
+Inductive reachable (del : DelegationSystem) : Agent -> Agent -> Prop :=
+  | reach_step : forall a b,
+      delegates_to del a b = true -> reachable del a b
+  | reach_trans : forall a b c,
+      delegates_to del a b = true ->
+      reachable del b c ->
+      reachable del a c.
+
+(** Acyclicity: no agent is reachable from itself. *)
+
+Definition acyclic (del : DelegationSystem) : Prop :=
+  forall a, ~ reachable del a a.
 
 (** A delegation is *well-formed* when it is cap-monotone, acyclic,
     and the base system is consistent. *)
@@ -628,17 +677,17 @@ Record well_formed_delegation (del : DelegationSystem) : Prop :=
   mkWFDelegation {
   wf_base_consistent : consistent (ds_base del);
   wf_cap_monotone    : cap_monotone del;
-  wf_no_mutual       : no_mutual_delegation del
+  wf_acyclic         : acyclic del
 }.
 
-(** Theorem: in a well-formed delegation, a delegate's lawful
-    punishment for an obligation is bounded by the original cap. *)
+(** Theorem: in a well-formed delegation, a delegate's cap from any
+    delegator is bounded by the base system cap. *)
 
 Theorem delegation_bounded :
   forall del delegator delegate obl s,
     well_formed_delegation del ->
     delegates_to del delegator delegate = true ->
-    s <= delegate_cap del delegate obl ->
+    s <= delegate_cap del delegator delegate obl ->
     s <= severity_cap (ds_base del) obl.
 Proof.
   intros del delegator delegate obl s [_ Hmono _] Hdel Hs.
@@ -646,8 +695,55 @@ Proof.
   lia.
 Qed.
 
-(** Witness: Taiidan delegates enforcement to a third party (the
-    Turanic Raiders, agent 2) with a reduced cap of 5. *)
+(** * Multi-Hop Delegation Chains *)
+
+(** Enforcement authority may pass through multiple delegates:
+    A delegates to B, B delegates to C, etc.  We model chains as
+    lists of agents where each adjacent pair has a delegation link.
+
+    [chain_cap] computes the effective cap at each hop by taking
+    the minimum of the delegate cap at that hop and the effective
+    cap from the previous hop. This makes caps genuinely relative. *)
+
+Fixpoint valid_chain (del : DelegationSystem) (chain : list Agent) : Prop :=
+  match chain with
+  | [] => True
+  | [_] => True
+  | a :: ((b :: _) as rest) =>
+      delegates_to del a b = true /\ valid_chain del rest
+  end.
+
+Fixpoint chain_cap (del : DelegationSystem) (chain : list Agent)
+  (obl : Obligation) : Severity :=
+  match chain with
+  | [] => 0
+  | [a] => severity_cap (ds_base del) obl
+  | a :: ((b :: _) as rest) =>
+      Nat.min (delegate_cap del a b obl) (chain_cap del rest obl)
+  end.
+
+(** The chain cap is bounded by the base system cap at every hop.
+    Proved by induction on the chain. *)
+
+Theorem chain_bounded :
+  forall del obl chain,
+    cap_monotone del ->
+    valid_chain del chain ->
+    chain_cap del chain obl <= severity_cap (ds_base del) obl.
+Proof.
+  intros del obl chain Hmono.
+  induction chain as [| a rest IH].
+  - simpl. lia.
+  - destruct rest as [| b rest'].
+    + simpl. lia.
+    + simpl. intros [Hdel Hvalid].
+      specialize (Hmono a b obl Hdel).
+      specialize (IH Hvalid).
+      lia.
+Qed.
+
+(** Witness: Taiidan delegates to Turanic Raiders (agent 2) with
+    a reduced cap of 5. *)
 
 Definition turanic := mkAgent 2.
 
@@ -655,8 +751,9 @@ Definition homeworld_delegation : DelegationSystem := mkDelegationSystem
   homeworld_system
   (fun delegator delegate =>
     agent_eqb delegator taiidan && agent_eqb delegate turanic)
-  (fun delegate obl =>
-    if agent_eqb delegate turanic && obligation_eqb obl treaty_no_hyperspace
+  (fun delegator delegate obl =>
+    if agent_eqb delegator taiidan && agent_eqb delegate turanic
+       && obligation_eqb obl treaty_no_hyperspace
     then 5 else 0).
 
 Lemma homeworld_delegation_cap_monotone :
@@ -664,23 +761,54 @@ Lemma homeworld_delegation_cap_monotone :
 Proof.
   intros delegator delegate obl Hdel.
   unfold homeworld_delegation, homeworld_system in *. simpl in *.
+  destruct (agent_eqb_spec delegator taiidan);
   destruct (agent_eqb_spec delegate turanic);
   destruct (obligation_eqb_spec obl treaty_no_hyperspace);
   subst; simpl; try lia.
-  all: unfold agent_eqb in Hdel; simpl in Hdel;
-       destruct delegator as [did]; simpl in Hdel;
-       destruct (Nat.eqb_spec did 0); try discriminate;
-       simpl in Hdel; discriminate.
+  all: simpl in Hdel; try discriminate.
 Qed.
 
-Lemma homeworld_delegation_no_mutual :
-  no_mutual_delegation homeworld_delegation.
+Lemma homeworld_delegates_to_shape :
+  forall a b,
+    delegates_to homeworld_delegation a b = true ->
+    a = taiidan /\ b = turanic.
 Proof.
-  intros a b Hab.
-  unfold homeworld_delegation in *. simpl in *.
+  intros a b H.
+  unfold homeworld_delegation in H. simpl in H.
   destruct (agent_eqb_spec a taiidan); destruct (agent_eqb_spec b turanic);
-    try discriminate.
-  subst. simpl. reflexivity.
+    subst; simpl in *; try discriminate.
+  auto.
+Qed.
+
+Lemma homeworld_reachable_target :
+  forall a b,
+    reachable homeworld_delegation a b ->
+    b = turanic.
+Proof.
+  intros a b H.
+  induction H as [a' b' Hdel | a' b' c Hdel Hreach IH].
+  - destruct (homeworld_delegates_to_shape a' b' Hdel). assumption.
+  - exact IH.
+Qed.
+
+Lemma homeworld_reachable_source :
+  forall a b,
+    reachable homeworld_delegation a b ->
+    a = taiidan.
+Proof.
+  intros a b H.
+  induction H as [a' b' Hdel | a' b' c Hdel Hreach IH].
+  - destruct (homeworld_delegates_to_shape a' b' Hdel). assumption.
+  - destruct (homeworld_delegates_to_shape a' b' Hdel). assumption.
+Qed.
+
+Lemma homeworld_delegation_acyclic :
+  acyclic homeworld_delegation.
+Proof.
+  intros a Hreach.
+  assert (H1 := homeworld_reachable_source a a Hreach).
+  assert (H2 := homeworld_reachable_target a a Hreach).
+  subst. unfold taiidan, turanic in H2. discriminate.
 Qed.
 
 Lemma homeworld_delegation_well_formed :
@@ -689,14 +817,14 @@ Proof.
   constructor.
   - exact homeworld_consistent.
   - exact homeworld_delegation_cap_monotone.
-  - exact homeworld_delegation_no_mutual.
+  - exact homeworld_delegation_acyclic.
 Qed.
 
 (** Instantiation: the Turanic Raiders cannot exceed severity 10
     (the original cap) when punishing on Taiidan's behalf. *)
 Lemma turanic_bounded_by_treaty_cap :
   forall s,
-    s <= delegate_cap homeworld_delegation turanic treaty_no_hyperspace ->
+    s <= delegate_cap homeworld_delegation taiidan turanic treaty_no_hyperspace ->
     s <= severity_cap homeworld_system treaty_no_hyperspace.
 Proof.
   intros s Hs.
@@ -707,9 +835,9 @@ Proof.
   - exact Hs.
 Qed.
 
-(** The delegate's cap is strictly less than the delegator's. *)
+(** The delegate's cap is strictly less than the base cap. *)
 Lemma turanic_cap_reduced :
-  delegate_cap homeworld_delegation turanic treaty_no_hyperspace <
+  delegate_cap homeworld_delegation taiidan turanic treaty_no_hyperspace <
   severity_cap homeworld_system treaty_no_hyperspace.
 Proof.
   unfold homeworld_delegation, homeworld_system. simpl. lia.
@@ -721,8 +849,9 @@ Definition amplifying_delegation : DelegationSystem := mkDelegationSystem
   homeworld_system
   (fun delegator delegate =>
     agent_eqb delegator taiidan && agent_eqb delegate turanic)
-  (fun delegate obl =>
-    if agent_eqb delegate turanic && obligation_eqb obl treaty_no_hyperspace
+  (fun delegator delegate obl =>
+    if agent_eqb delegator taiidan && agent_eqb delegate turanic
+       && obligation_eqb obl treaty_no_hyperspace
     then 50 else 0).
 
 Lemma amplifying_not_cap_monotone :
@@ -735,53 +864,8 @@ Proof.
   lia.
 Qed.
 
-(** * Multi-Hop Delegation Chains *)
-
-(** Enforcement authority may pass through multiple delegates:
-    A delegates to B, B delegates to C, etc.  We model chains as
-    lists of agents where each adjacent pair has a delegation link.
-    The theorem: severity cannot be amplified through any chain. *)
-
-Fixpoint valid_chain (del : DelegationSystem) (chain : list Agent) : Prop :=
-  match chain with
-  | [] => True
-  | [_] => True
-  | a :: ((b :: _) as rest) =>
-      delegates_to del a b = true /\ valid_chain del rest
-  end.
-
-(** The cap at the end of a chain is at most the cap at the start.
-    We prove this by induction on the chain, using cap-monotonicity
-    at each hop. *)
-
-(** First, a helper: for a single hop. *)
-Lemma single_hop_cap :
-  forall del a b obl,
-    cap_monotone del ->
-    delegates_to del a b = true ->
-    delegate_cap del b obl <= severity_cap (ds_base del) obl.
-Proof.
-  intros del a b obl Hmono Hdel.
-  exact (Hmono a b obl Hdel).
-Qed.
-
-(** The key chain theorem: for any valid chain in a cap-monotone
-    system, the delegate cap of any member is bounded by the base
-    system cap. *)
-
-Theorem chain_bounded :
-  forall del obl chain a,
-    cap_monotone del ->
-    valid_chain del chain ->
-    In a chain ->
-    (exists predecessor, delegates_to del predecessor a = true) ->
-    delegate_cap del a obl <= severity_cap (ds_base del) obl.
-Proof.
-  intros del obl chain a Hmono Hvalid Hin [pred Hpred].
-  exact (Hmono pred a obl Hpred).
-Qed.
-
-(** Witness: a 3-hop chain Taiidan -> Turanic -> agent 3. *)
+(** Witness: a 3-hop chain Taiidan -> Turanic -> Kadeshi (agent 3).
+    Caps decrease at each hop: 10 -> 5 -> 2. *)
 
 Definition kadeshi := mkAgent 3.
 
@@ -790,10 +874,10 @@ Definition three_hop_delegation : DelegationSystem := mkDelegationSystem
   (fun delegator delegate =>
     (agent_eqb delegator taiidan && agent_eqb delegate turanic) ||
     (agent_eqb delegator turanic && agent_eqb delegate kadeshi))
-  (fun delegate obl =>
+  (fun delegator delegate obl =>
     if obligation_eqb obl treaty_no_hyperspace then
-      if agent_eqb delegate turanic then 5
-      else if agent_eqb delegate kadeshi then 2
+      if agent_eqb delegator taiidan && agent_eqb delegate turanic then 5
+      else if agent_eqb delegator turanic && agent_eqb delegate kadeshi then 2
       else 0
     else 0).
 
@@ -802,15 +886,22 @@ Lemma three_hop_cap_monotone :
 Proof.
   intros delegator delegate obl Hdel.
   unfold three_hop_delegation, homeworld_system in *. simpl in *.
-  destruct (obligation_eqb_spec obl treaty_no_hyperspace);
-  destruct (agent_eqb_spec delegate turanic);
-  destruct (agent_eqb_spec delegate kadeshi);
-  subst; simpl; try lia.
-  all: rewrite Bool.orb_true_iff in Hdel;
-       destruct Hdel as [Hdel | Hdel];
-       destruct (agent_eqb_spec delegator taiidan);
-       destruct (agent_eqb_spec delegator turanic);
-       subst; simpl in *; try discriminate; try lia.
+  destruct (obligation_eqb_spec obl treaty_no_hyperspace); subst; simpl.
+  - rewrite Bool.orb_true_iff in Hdel.
+    destruct Hdel as [Hdel | Hdel].
+    + destruct (agent_eqb_spec delegator taiidan);
+      destruct (agent_eqb_spec delegate turanic);
+      subst; simpl in *; try discriminate; try lia.
+    + destruct (agent_eqb_spec delegator turanic);
+      destruct (agent_eqb_spec delegate kadeshi);
+      subst; simpl in *; try discriminate; try lia.
+  - rewrite Bool.orb_true_iff in Hdel.
+    destruct Hdel as [Hdel | Hdel];
+    destruct (agent_eqb_spec delegator taiidan);
+    destruct (agent_eqb_spec delegator turanic);
+    destruct (agent_eqb_spec delegate turanic);
+    destruct (agent_eqb_spec delegate kadeshi);
+    subst; simpl in *; try discriminate; try lia.
 Qed.
 
 Lemma three_hop_valid_chain :
@@ -823,23 +914,26 @@ Proof.
     + exact I.
 Qed.
 
-(** Even at the end of the chain, the cap (2) is bounded by the
-    original system cap (10). *)
-Lemma kadeshi_still_bounded :
-  delegate_cap three_hop_delegation kadeshi treaty_no_hyperspace <=
+(** The chain cap at the end (2) is bounded by the base cap (10).
+    This is proved by induction via [chain_bounded], not by flat
+    lookup. *)
+Lemma three_hop_chain_bounded :
+  chain_cap three_hop_delegation [taiidan; turanic; kadeshi]
+    treaty_no_hyperspace <=
   severity_cap homeworld_system treaty_no_hyperspace.
 Proof.
-  unfold three_hop_delegation, homeworld_system. simpl. lia.
+  apply chain_bounded.
+  - exact three_hop_cap_monotone.
+  - exact three_hop_valid_chain.
 Qed.
 
 (** The caps strictly decrease: 10 -> 5 -> 2. *)
 Lemma chain_strictly_decreasing :
-  severity_cap homeworld_system treaty_no_hyperspace >
-  delegate_cap three_hop_delegation turanic treaty_no_hyperspace /\
-  delegate_cap three_hop_delegation turanic treaty_no_hyperspace >
-  delegate_cap three_hop_delegation kadeshi treaty_no_hyperspace.
+  severity_cap homeworld_system treaty_no_hyperspace = 10 /\
+  delegate_cap three_hop_delegation taiidan turanic treaty_no_hyperspace = 5 /\
+  delegate_cap three_hop_delegation turanic kadeshi treaty_no_hyperspace = 2.
 Proof.
-  unfold three_hop_delegation, homeworld_system. simpl. lia.
+  unfold three_hop_delegation, homeworld_system. simpl. auto.
 Qed.
 
 (** * Temporal Obligations and Enforcement Windows *)
@@ -965,6 +1059,60 @@ Proof.
   - exact kharak_temporally_valid.
 Qed.
 
+(** A response is *temporally lawful* when it is lawful in the base
+    deontic system AND temporally valid. *)
+
+Definition temporally_lawful
+  (ds : DeonticSystem) (tobl : TemporalObligation) (tr : TemporalResponse)
+  : Prop :=
+  lawful ds (base_response tr) /\ temporally_valid tobl tr.
+
+(** A lawful-but-temporally-invalid response exists: enforcement
+    after expiration is lawful in the base system but not temporally
+    lawful. *)
+Lemma lawful_not_temporally_lawful :
+  exists ds tobl tr,
+    lawful ds (base_response tr) /\
+    ~ temporally_valid tobl tr.
+Proof.
+  exists homeworld_system, hyperspace_treaty_temporal, late_enforcement.
+  split.
+  - unfold late_enforcement. simpl. exact proportional_lawful.
+  - exact late_enforcement_invalid.
+Qed.
+
+(** In a temporally lawful response, severity is still bounded. *)
+Theorem temporally_lawful_bounded :
+  forall ds tobl tr,
+    temporally_lawful ds tobl tr ->
+    severity (base_response tr) <= severity_cap ds (cause (base_response tr)).
+Proof.
+  intros ds tobl tr [[_ Hbnd] _]. exact Hbnd.
+Qed.
+
+(** A delegated response is *lawful* when its severity is bounded by
+    both the delegate cap and the base system cap. *)
+
+Definition lawful_delegated
+  (del : DelegationSystem) (delegator : Agent)
+  (pr : PunitiveResponse) : Prop :=
+  authorized (ds_base del) pr /\
+  delegates_to del delegator (enforcer pr) = true /\
+  severity pr <= delegate_cap del delegator (enforcer pr) (cause pr) /\
+  severity pr <= severity_cap (ds_base del) (cause pr).
+
+(** Delegation cannot launder an unbounded response into a lawful
+    delegated one. *)
+Theorem delegation_no_laundering :
+  forall del delegator pr,
+    well_formed_delegation del ->
+    unbounded (ds_base del) pr ->
+    ~ lawful_delegated del delegator pr.
+Proof.
+  intros del delegator pr Hwf Hunb [_ [_ [_ Hbase]]].
+  unfold unbounded in Hunb. lia.
+Qed.
+
 (** * Multi-Violation Proportionality *)
 
 (** When an agent violates multiple obligations, the total permissible
@@ -980,24 +1128,6 @@ Fixpoint sum_caps (ds : DeonticSystem) (obls : list Obligation) : nat :=
   | [] => 0
   | o :: rest => severity_cap ds o + sum_caps ds rest
   end.
-
-(** If every obligation has cap at most [k], then the sum of caps
-    for [n] obligations is at most [n * k]. *)
-Lemma sum_caps_linear_bound :
-  forall ds obls k,
-    (forall o, In o obls -> severity_cap ds o <= k) ->
-    sum_caps ds obls <= length obls * k.
-Proof.
-  intros ds obls k Hcap.
-  induction obls as [| o rest IH].
-  - simpl. lia.
-  - simpl.
-    assert (Ho : severity_cap ds o <= k).
-    { apply Hcap. left. reflexivity. }
-    assert (Hrest : sum_caps ds rest <= length rest * k).
-    { apply IH. intros o' Hin. apply Hcap. right. exact Hin. }
-    lia.
-Qed.
 
 (** The total lawful punishment for [n] violations, each with one
     lawful response per obligation, is bounded by the sum of caps.
@@ -1085,36 +1215,224 @@ Proof.
   unfold three_strikes_system, strike1, strike2, strike3. simpl. lia.
 Qed.
 
-(** The 3rd-strike cap (50) exceeds 3 * max_single_cap (15),
-    violating linear proportionality. *)
+(** A system has *linear caps* when the sum of caps for any list of
+    obligations is bounded by the length times a uniform cap. *)
+
+Definition linear_caps (ds : DeonticSystem) (k : Severity) : Prop :=
+  forall o, severity_cap ds o <= k.
+
+(** The three-strikes system violates linear caps with k=5
+    (the single-strike cap). *)
+Lemma three_strikes_not_linear :
+  ~ linear_caps three_strikes_system 5.
+Proof.
+  intros H.
+  specialize (H strike3).
+  unfold three_strikes_system, strike3 in H. simpl in H. lia.
+Qed.
+
+(** * Second Witness System *)
+
+(** A trade embargo system with three agents and distinct caps,
+    confirming the framework generalizes beyond homeworld_system. *)
+
+Definition embargo_enforcer := mkAgent 10.
+Definition embargo_violator := mkAgent 11.
+Definition embargo_observer := mkAgent 12.
+Definition trade_embargo := mkObligation 10.
+
+Definition embargo_system : DeonticSystem := mkDeonticSystem
+  [embargo_enforcer; embargo_violator; embargo_observer]
+  (fun a o =>
+    agent_eqb a embargo_violator && obligation_eqb o trade_embargo)
+  (fun a o =>
+    agent_eqb a embargo_violator && obligation_eqb o trade_embargo)
+  (fun enforcer target =>
+    agent_eqb enforcer embargo_enforcer && agent_eqb target embargo_violator)
+  (fun o =>
+    if obligation_eqb o trade_embargo then 20 else 0).
+
+Lemma embargo_coherent : coherent embargo_system.
+Proof.
+  split; [| split].
+  - intros a o H. exact H.
+  - intros a b H.
+    unfold embargo_system in H. simpl in H.
+    destruct (agent_eqb_spec a embargo_enforcer);
+    destruct (agent_eqb_spec b embargo_violator);
+    subst; simpl in *; try discriminate.
+    split; [left; reflexivity | right; left; reflexivity].
+  - intros o Hcap.
+    unfold embargo_system in *. simpl in *.
+    destruct (obligation_eqb_spec o trade_embargo); subst.
+    + exists embargo_violator. simpl. split.
+      * right. left. reflexivity.
+      * reflexivity.
+    + simpl in Hcap. lia.
+Qed.
+
+Lemma embargo_consistent : consistent embargo_system.
+Proof.
+  constructor.
+  - exact embargo_coherent.
+  - intros [n]. unfold embargo_system, agent_eqb. simpl.
+    destruct (Nat.eqb_spec n 10); destruct (Nat.eqb_spec n 11);
+      subst; auto; try lia.
+  - intros a o Hin Hobl.
+    unfold embargo_system in *. simpl in *.
+    destruct Hin as [Ha | [Ha | [Ha | []]]]; subst; simpl in Hobl;
+      try discriminate.
+    unfold agent_eqb in Hobl. simpl in Hobl.
+    destruct (obligation_eqb_spec o trade_embargo); subst.
+    + simpl. lia.
+    + simpl in Hobl. discriminate.
+Qed.
+
+Definition embargo_proportional := mkPunitiveResponse
+  embargo_enforcer embargo_violator trade_embargo 15.
+
+Definition embargo_excessive := mkPunitiveResponse
+  embargo_enforcer embargo_violator trade_embargo 30.
+
+Lemma embargo_proportional_lawful :
+  lawful embargo_system embargo_proportional.
+Proof.
+  split.
+  - unfold authorized, embargo_system, embargo_proportional. simpl.
+    repeat split; auto.
+  - unfold bounded, embargo_system, embargo_proportional. simpl. lia.
+Qed.
+
+Lemma embargo_excessive_unlawful :
+  authorized embargo_system embargo_excessive /\
+  unbounded embargo_system embargo_excessive /\
+  ~ lawful embargo_system embargo_excessive.
+Proof.
+  split; [| split].
+  - unfold authorized, embargo_system, embargo_excessive. simpl.
+    repeat split; auto.
+  - unfold unbounded, embargo_system, embargo_excessive. simpl. lia.
+  - intros [_ Hbnd].
+    unfold bounded, embargo_system, embargo_excessive in Hbnd.
+    simpl in Hbnd. lia.
+Qed.
+
+(** * Decision Procedures *)
+
+(** Computable classifiers for authorization, boundedness, and
+    lawfulness, with reflection lemmas. *)
+
+Fixpoint In_agentb (a : Agent) (l : list Agent) : bool :=
+  match l with
+  | [] => false
+  | x :: rest => agent_eqb a x || In_agentb a rest
+  end.
+
+Lemma In_agentb_spec : forall a l,
+  In_agentb a l = true <-> In a l.
+Proof.
+  intros a l.
+  induction l as [| x rest IH].
+  - simpl. split; [discriminate | tauto].
+  - simpl. rewrite Bool.orb_true_iff, IH.
+    split.
+    + intros [H | H].
+      * left. destruct (agent_eqb_spec a x) as [e | ne];
+          [symmetry; exact e | discriminate].
+      * right. exact H.
+    + intros [H | H].
+      * left. subst. unfold agent_eqb. rewrite Nat.eqb_refl. reflexivity.
+      * right. exact H.
+Qed.
+
+Definition authorizedb (ds : DeonticSystem) (pr : PunitiveResponse) : bool :=
+  In_agentb (enforcer pr) (agents ds) &&
+  In_agentb (target pr) (agents ds) &&
+  may_enforce ds (enforcer pr) (target pr) &&
+  violated ds (target pr) (cause pr) &&
+  obligated ds (target pr) (cause pr).
+
+Lemma authorizedb_spec : forall ds pr,
+  authorizedb ds pr = true <-> authorized ds pr.
+Proof.
+  intros ds pr. unfold authorizedb, authorized.
+  repeat rewrite Bool.andb_true_iff.
+  repeat rewrite In_agentb_spec.
+  tauto.
+Qed.
+
+Definition boundedb (ds : DeonticSystem) (pr : PunitiveResponse) : bool :=
+  severity pr <=? severity_cap ds (cause pr).
+
+Lemma boundedb_spec : forall ds pr,
+  boundedb ds pr = true <-> bounded ds pr.
+Proof.
+  intros ds pr. unfold boundedb, bounded.
+  rewrite Nat.leb_le. tauto.
+Qed.
+
+Definition lawfulb (ds : DeonticSystem) (pr : PunitiveResponse) : bool :=
+  authorizedb ds pr && boundedb ds pr.
+
+Lemma lawfulb_spec : forall ds pr,
+  lawfulb ds pr = true <-> lawful ds pr.
+Proof.
+  intros ds pr. unfold lawfulb, lawful.
+  rewrite Bool.andb_true_iff, authorizedb_spec, boundedb_spec.
+  tauto.
+Qed.
+
+(** Computational test: the proportional response is lawful. *)
+Lemma proportional_lawful_compute :
+  lawfulb homeworld_system proportional_response = true.
+Proof. reflexivity. Qed.
+
+(** Computational test: the extermination is not lawful. *)
+Lemma extermination_not_lawful_compute :
+  lawfulb homeworld_system extermination_response = false.
+Proof. reflexivity. Qed.
 
 (** * Combined Bounded Enforcement Theorem *)
 
-(** Combined statement for any deontic system:
+(** Combined statement covering all enforcement avenues:
 
     (1) Every individual lawful response has severity <= cap.
     (2) The aggregate lawful severity from [n] enforcers is <= n * cap.
-    (3) No authorized-but-unbounded response is lawful. *)
+    (3) No authorized-but-unbounded response is lawful.
+    (4) In a delegation hierarchy, the chain cap is bounded by the
+        base system cap.
+    (5) Enforcement outside the temporal window is invalid. *)
 
 Theorem bounded_enforcement_synthesis :
   forall ds,
-    (* For every lawful response, severity is capped *)
     (forall pr, lawful ds pr -> severity pr <= severity_cap ds (cause pr))
     /\
-    (* Aggregate enforcement by n enforcers is linearly bounded *)
     (forall tgt obl responses,
       all_lawful ds responses ->
       all_target_same tgt obl responses ->
       total_severity responses <= length responses * severity_cap ds obl)
     /\
-    (* Authorization alone never makes an unbounded response lawful *)
     (forall pr,
-      authorized ds pr -> unbounded ds pr -> ~ lawful ds pr).
+      authorized ds pr -> unbounded ds pr -> ~ lawful ds pr)
+    /\
+    (forall del obl chain,
+      ds_base del = ds ->
+      cap_monotone del ->
+      valid_chain del chain ->
+      chain_cap del chain obl <= severity_cap ds obl)
+    /\
+    (forall tobl tr,
+      well_formed_temporal tobl ->
+      enforcement_time tr >= expires_at tobl ->
+      ~ temporally_valid tobl tr).
 Proof.
   intros ds. repeat split.
   - exact (per_response_bound ds).
   - exact (aggregate_enforcement_bound ds).
   - exact (no_unbounded_lawful ds).
+  - intros del obl chain Hbase Hmono Hvalid.
+    subst. exact (chain_bounded del obl chain Hmono Hvalid).
+  - exact expired_enforcement_invalid.
 Qed.
 
 (** Non-triviality certificate: all three conjuncts have non-vacuous
@@ -1148,6 +1466,17 @@ Proof.
   { exists extermination_response.
     split. { exact extermination_authorized. }
     exact extermination_unbounded. }
+Qed.
+
+(** Completeness: authorized and bounded is sufficient for lawfulness. *)
+
+Theorem authorized_bounded_lawful :
+  forall ds pr,
+    authorized ds pr ->
+    bounded ds pr ->
+    lawful ds pr.
+Proof.
+  intros ds pr Hauth Hbnd. split; assumption.
 Qed.
 
 (** * The Kharak Theorem *)
