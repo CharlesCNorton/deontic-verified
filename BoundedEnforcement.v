@@ -3061,3 +3061,107 @@ Proof.
   - lia.
   - lia.
 Qed.
+
+(** * Rights as Enforcement Constraints *)
+
+(** Rights constrain enforcement: even when punishment is authorized
+    and bounded, the target may hold rights that limit how
+    enforcement proceeds. *)
+
+Inductive Right :=
+  | DueProcess
+  | ProportionalityReview
+  | Appeal
+  | HabeasCorpus.
+
+(** A [RightsSystem] associates rights with agents and requires
+    that enforcement respects them. *)
+
+Record RightsSystem := mkRightsSystem {
+  rs_base    : DeonticSystem;
+  rs_rights  : Agent -> list Right;
+  rs_process : Agent -> bool
+}.
+
+(** A right is *held* by an agent. *)
+
+Definition holds_right (rs : RightsSystem) (a : Agent) (r : Right) : Prop :=
+  In r (rs_rights rs a).
+
+(** Due process requires that the enforcer has followed procedure
+    (modeled as the [rs_process] flag). *)
+
+Definition due_process_satisfied (rs : RightsSystem)
+  (pr : PunitiveResponse) : Prop :=
+  holds_right rs (target pr) DueProcess ->
+  rs_process rs (target pr) = true.
+
+(** A *rights-respecting* enforcement satisfies due process and
+    is otherwise lawful. *)
+
+Definition rights_respecting (rs : RightsSystem)
+  (pr : PunitiveResponse) : Prop :=
+  lawful (rs_base rs) pr /\
+  due_process_satisfied rs pr.
+
+(** Enforcement that violates due process is not rights-respecting,
+    even if otherwise lawful. *)
+
+Theorem due_process_required :
+  forall rs pr,
+    holds_right rs (target pr) DueProcess ->
+    rs_process rs (target pr) = false ->
+    ~ rights_respecting rs pr.
+Proof.
+  intros rs pr Hright Hfalse [_ Hdp].
+  assert (H := Hdp Hright). rewrite H in Hfalse. discriminate.
+Qed.
+
+(** Rights-respecting enforcement is still bounded. *)
+
+Theorem rights_respecting_bounded :
+  forall rs pr,
+    rights_respecting rs pr ->
+    severity pr <= severity_cap (rs_base rs) (cause pr).
+Proof.
+  intros rs pr [Hlaw _].
+  exact (lawful_bounded (rs_base rs) pr Hlaw).
+Qed.
+
+(** Witness: Kushan holds due process rights.  Enforcement without
+    process is invalid. *)
+
+Definition homeworld_rights := mkRightsSystem
+  homeworld_system
+  (fun a => if agent_eqb a kushan then [DueProcess; Appeal] else [])
+  (fun _ => false).
+
+Lemma kushan_holds_due_process :
+  holds_right homeworld_rights kushan DueProcess.
+Proof.
+  unfold holds_right, homeworld_rights. simpl. left. reflexivity.
+Qed.
+
+Lemma enforcement_without_process :
+  ~ rights_respecting homeworld_rights proportional_response.
+Proof.
+  apply due_process_required.
+  - exact kushan_holds_due_process.
+  - reflexivity.
+Qed.
+
+(** A system with due process satisfied permits enforcement. *)
+
+Definition homeworld_rights_with_process := mkRightsSystem
+  homeworld_system
+  (fun a => if agent_eqb a kushan then [DueProcess; Appeal] else [])
+  (fun a => agent_eqb a kushan).
+
+Lemma enforcement_with_process :
+  rights_respecting homeworld_rights_with_process proportional_response.
+Proof.
+  split.
+  - exact proportional_lawful.
+  - unfold due_process_satisfied, homeworld_rights_with_process,
+           proportional_response. simpl. auto.
+Qed.
