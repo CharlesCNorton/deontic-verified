@@ -553,6 +553,30 @@ Qed.
 Lemma two_responses_concrete : total_severity two_responses = 15.
 Proof. reflexivity. Qed.
 
+(** When enforcers are distinct population members, the number of
+    responses is bounded by the population size.  We state the
+    aggregate bound with an explicit population-size hypothesis,
+    avoiding the need for NoDup infrastructure over agents. *)
+
+Definition distinct_enforcers (responses : list PunitiveResponse) : Prop :=
+  NoDup (map enforcer responses).
+
+Definition enforcers_in_population
+  (ds : DeonticSystem) (responses : list PunitiveResponse) : Prop :=
+  forall pr, In pr responses -> In (enforcer pr) (agents ds).
+
+Theorem population_bounded_aggregate :
+  forall ds tgt obl responses,
+    all_lawful ds responses ->
+    all_target_same tgt obl responses ->
+    length responses <= length (agents ds) ->
+    total_severity responses <= length (agents ds) * severity_cap ds obl.
+Proof.
+  intros ds tgt obl responses Hlawful Hsame Hpop.
+  assert (Hagg := aggregate_enforcement_bound ds tgt obl responses Hlawful Hsame).
+  nia.
+Qed.
+
 (** * The Main Theorem *)
 
 (** No authorized response that exceeds the severity cap is lawful.
