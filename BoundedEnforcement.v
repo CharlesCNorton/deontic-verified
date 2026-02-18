@@ -636,7 +636,6 @@ Definition ne_bis_in_idem
   (ds : DeonticSystem) (responses : list PunitiveResponse)
   (tgt : Agent) (obl : Obligation) : Prop :=
   all_target_same tgt obl responses /\
-  NoDup (map enforcer responses) /\
   length responses <= 1.
 
 Theorem ne_bis_in_idem_bound :
@@ -645,7 +644,7 @@ Theorem ne_bis_in_idem_bound :
     ne_bis_in_idem ds responses tgt obl ->
     total_severity responses <= severity_cap ds obl.
 Proof.
-  intros ds tgt obl responses Hlawful [Hsame [Hnodup Hlen]].
+  intros ds tgt obl responses Hlawful [Hsame Hlen].
   destruct responses as [| pr rest].
   - simpl. lia.
   - simpl in Hlen. assert (rest = []) as -> by (destruct rest; [reflexivity | simpl in Hlen; lia]).
@@ -662,11 +661,8 @@ Lemma homeworld_ne_bis_in_idem :
   ne_bis_in_idem homeworld_system [proportional_response]
     kushan treaty_no_hyperspace.
 Proof.
-  split; [| split].
+  split.
   - intros pr Hin. destruct Hin as [H | []]; subst; simpl; auto.
-  - simpl. constructor.
-    + intros [].
-    + constructor.
   - simpl. lia.
 Qed.
 
