@@ -1188,7 +1188,11 @@ Definition temporally_valid (tobl : TemporalObligation) (tr : TemporalResponse) 
   active tobl (enforcement_time tr) /\
   violation_time tr <= enforcement_time tr.
 
-(** Well-formedness: [created_at < expires_at] (non-degenerate window). *)
+(** Well-formedness: [created_at < expires_at] (non-degenerate window).
+    Single-tick windows ([expires_at = created_at + 1]) are intentionally
+    permitted — the framework models discrete time steps, and an
+    obligation active for exactly one tick is the minimal non-trivial
+    case. *)
 Definition well_formed_temporal (tobl : TemporalObligation) : Prop :=
   created_at tobl < expires_at tobl.
 
