@@ -1393,6 +1393,46 @@ Proof.
     unfold bounded in Hbnd. lia.
 Qed.
 
+(** Relational pairing: each obligation paired with its response.
+    Order-independent — reordering the list doesn't break anything. *)
+
+Definition paired_responses
+  (ds : DeonticSystem) (pairs : list (Obligation * PunitiveResponse)) : Prop :=
+  forall o pr, In (o, pr) pairs -> lawful ds pr /\ cause pr = o.
+
+Fixpoint sum_pair_caps (ds : DeonticSystem)
+  (pairs : list (Obligation * PunitiveResponse)) : nat :=
+  match pairs with
+  | [] => 0
+  | (o, _) :: rest => severity_cap ds o + sum_pair_caps ds rest
+  end.
+
+Fixpoint sum_pair_severities
+  (pairs : list (Obligation * PunitiveResponse)) : nat :=
+  match pairs with
+  | [] => 0
+  | (_, pr) :: rest => severity pr + sum_pair_severities rest
+  end.
+
+Theorem paired_violation_bound :
+  forall ds pairs,
+    paired_responses ds pairs ->
+    sum_pair_severities pairs <= sum_pair_caps ds pairs.
+Proof.
+  intros ds pairs Hpaired.
+  induction pairs as [| [o pr] rest IH].
+  - simpl. lia.
+  - simpl.
+    assert (Hpr : lawful ds pr /\ cause pr = o).
+    { apply Hpaired. left. reflexivity. }
+    destruct Hpr as [Hlaw Hcause].
+    assert (Hbnd := lawful_bounded ds pr Hlaw). unfold bounded in Hbnd.
+    subst.
+    assert (Hrest : sum_pair_severities rest <= sum_pair_caps ds rest).
+    { apply IH. intros o' pr' Hin. apply Hpaired. right. exact Hin. }
+    lia.
+Qed.
+
 (** Witness: Kushan violates both the hyperspace treaty (cap 10) and
     the tribute treaty (cap 0).  Total lawful punishment is at most
     10 + 0 = 10 per enforcer. *)
