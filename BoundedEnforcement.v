@@ -1277,6 +1277,62 @@ Proof.
   - exact kharak_temporally_valid.
 Qed.
 
+(** An [EnforceableObligation] separates the obligation's active
+    period from the enforcement window. The statute of limitations
+    may extend beyond obligation expiry. *)
+
+Record EnforceableObligation := mkEnforceableObligation {
+  eo_obligation     : Obligation;
+  eo_created_at     : Time;
+  eo_expires_at     : Time;
+  eo_enforce_until  : Time
+}.
+
+Definition obligation_active (eo : EnforceableObligation) (t : Time) : Prop :=
+  eo_created_at eo <= t /\ t < eo_expires_at eo.
+
+Definition enforceable (eo : EnforceableObligation) (t : Time) : Prop :=
+  eo_created_at eo <= t /\ t < eo_enforce_until eo.
+
+Definition well_formed_enforceable (eo : EnforceableObligation) : Prop :=
+  eo_created_at eo < eo_expires_at eo /\
+  eo_expires_at eo <= eo_enforce_until eo.
+
+(** Enforcement is valid when the violation occurred while the
+    obligation was active and enforcement occurs within the
+    statute of limitations. *)
+Definition enforcement_valid (eo : EnforceableObligation)
+  (tr : TemporalResponse) : Prop :=
+  eo_obligation eo = cause (base_response tr) /\
+  obligation_active eo (violation_time tr) /\
+  enforceable eo (enforcement_time tr) /\
+  violation_time tr <= enforcement_time tr.
+
+(** Enforcement after the statute of limitations is invalid. *)
+Theorem statute_expired_invalid :
+  forall eo tr,
+    enforcement_time tr >= eo_enforce_until eo ->
+    ~ enforcement_valid eo tr.
+Proof.
+  intros eo tr Hlate [_ [_ [[_ Hact] _]]]. lia.
+Qed.
+
+(** Enforcement after obligation expiry but within the statute of
+    limitations can be valid. This is impossible under the old
+    [temporally_valid] which conflated the two windows. *)
+Lemma post_expiry_enforcement_possible :
+  exists eo tr,
+    well_formed_enforceable eo /\
+    enforcement_valid eo tr /\
+    enforcement_time tr >= eo_expires_at eo.
+Proof.
+  exists (mkEnforceableObligation treaty_no_hyperspace 0 100 200).
+  exists (mkTemporalResponse proportional_response 50 150).
+  unfold well_formed_enforceable, enforcement_valid, obligation_active,
+         enforceable, proportional_response. simpl.
+  repeat split; lia.
+Qed.
+
 (** A response is *temporally lawful* when it is lawful in the base
     deontic system AND temporally valid. *)
 
