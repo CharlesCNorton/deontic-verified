@@ -2780,3 +2780,138 @@ Proof.
     injection Hobl. lia.
   - unfold homeworld_cr in Hgt. simpl in Hgt. lia.
 Qed.
+
+(** * Defeasible Norms *)
+
+(** A defeasible norm is an obligation that holds by default but can
+    be overridden by a specific exception.  We model this with a
+    priority-indexed obligation structure: each obligation carries a
+    priority, and higher-priority norms defeat lower-priority ones. *)
+
+Record DefeasibleObligation := mkDefeasibleObligation {
+  do_obligation : Obligation;
+  do_priority   : nat;
+  do_agent      : Agent
+}.
+
+(** A [DefeasibleSystem] extends a deontic system with defeasible
+    obligations and exception rules. *)
+
+Record ExceptionRule := mkExceptionRule {
+  er_overrides : Obligation;
+  er_exception : Obligation;
+  er_agent     : Agent
+}.
+
+(** An exception is *active* when the agent bears the exception
+    obligation and has not violated it. *)
+
+Definition exception_active (ds : DeonticSystem) (er : ExceptionRule) : Prop :=
+  obligated ds (er_agent er) (er_exception er) = true /\
+  violated ds (er_agent er) (er_exception er) = false.
+
+(** An obligation is *defeated* when an active exception overrides it. *)
+
+Definition defeated (ds : DeonticSystem)
+  (exceptions : list ExceptionRule) (a : Agent) (o : Obligation) : Prop :=
+  exists er,
+    In er exceptions /\
+    er_agent er = a /\
+    er_overrides er = o /\
+    exception_active ds er.
+
+(** A *defeasible enforcement* is lawful only if the targeted
+    obligation is not defeated by an active exception. *)
+
+Definition defeasibly_lawful (ds : DeonticSystem)
+  (exceptions : list ExceptionRule) (pr : PunitiveResponse) : Prop :=
+  lawful ds pr /\
+  ~ defeated ds exceptions (target pr) (cause pr).
+
+(** Defeating an obligation blocks enforcement. *)
+
+Theorem defeated_blocks_enforcement :
+  forall ds exceptions pr,
+    defeated ds exceptions (target pr) (cause pr) ->
+    ~ defeasibly_lawful ds exceptions pr.
+Proof.
+  intros ds exceptions pr Hdef [_ Hndef].
+  exact (Hndef Hdef).
+Qed.
+
+(** Defeasible enforcement is still bounded by the cap. *)
+
+Theorem defeasibly_lawful_bounded :
+  forall ds exceptions pr,
+    defeasibly_lawful ds exceptions pr ->
+    severity pr <= severity_cap ds (cause pr).
+Proof.
+  intros ds exceptions pr [Hlaw _].
+  exact (lawful_bounded ds pr Hlaw).
+Qed.
+
+(** Witness: Kushan's hyperspace obligation is defeasible.  If the
+    Bentusi grant an exception (a technology-sharing treaty), the
+    hyperspace obligation is defeated and not enforceable. *)
+
+Definition bentusi := mkAgent 4.
+Definition bentusi_treaty := mkObligation 3.
+
+Definition hyperspace_exception := mkExceptionRule
+  treaty_no_hyperspace bentusi_treaty kushan.
+
+(** A modified system where Kushan bears both the hyperspace treaty
+    and the Bentusi exception, and has NOT violated the exception. *)
+
+Definition homeworld_with_exception : DeonticSystem := mkDeonticSystem
+  [taiidan; kushan; bentusi]
+  (fun a o =>
+    (agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace) ||
+    (agent_eqb a kushan && obligation_eqb o bentusi_treaty))
+  (fun a o =>
+    agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace)
+  (fun enforcer target =>
+    agent_eqb enforcer taiidan && agent_eqb target kushan)
+  (fun o =>
+    if obligation_eqb o treaty_no_hyperspace then 10 else 0).
+
+Lemma bentusi_exception_active :
+  exception_active homeworld_with_exception hyperspace_exception.
+Proof.
+  unfold exception_active, homeworld_with_exception, hyperspace_exception.
+  simpl. auto.
+Qed.
+
+Lemma hyperspace_defeated :
+  defeated homeworld_with_exception [hyperspace_exception]
+    kushan treaty_no_hyperspace.
+Proof.
+  exists hyperspace_exception.
+  split; [left; reflexivity |].
+  split; [reflexivity |].
+  split; [reflexivity |].
+  exact bentusi_exception_active.
+Qed.
+
+(** Enforcement of the hyperspace obligation is blocked by the
+    Bentusi exception. *)
+
+Lemma hyperspace_enforcement_blocked :
+  forall pr,
+    target pr = kushan ->
+    cause pr = treaty_no_hyperspace ->
+    ~ defeasibly_lawful homeworld_with_exception
+        [hyperspace_exception] pr.
+Proof.
+  intros pr Htgt Hcause.
+  apply defeated_blocks_enforcement.
+  rewrite Htgt, Hcause. exact hyperspace_defeated.
+Qed.
+
+(** Without the exception, enforcement proceeds normally. *)
+
+Lemma no_exception_not_defeated :
+  ~ defeated homeworld_system [] kushan treaty_no_hyperspace.
+Proof.
+  intros [er [Hin _]]. destruct Hin.
+Qed.
