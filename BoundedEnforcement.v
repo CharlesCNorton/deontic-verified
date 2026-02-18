@@ -1872,8 +1872,7 @@ Definition NormativeStatus := Agent -> Obligation -> DeonticModality.
 
 Definition modally_consistent (ns : NormativeStatus) : Prop :=
   (forall a o, ns a o = OBL -> ns a o <> FORB) /\
-  (forall a o, ns a o = FORB -> ns a o <> PERM) /\
-  (forall a o, ns a o = OBL -> ns a o <> FORB).
+  (forall a o, ns a o = FORB -> ns a o <> PERM).
 
 (** A normative status is *grounded* in a deontic system when:
     - OBL matches [obligated],
