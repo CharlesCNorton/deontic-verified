@@ -695,7 +695,46 @@ Proof.
   lia.
 Qed.
 
-(** * Multi-Hop Delegation Chains *)
+(** In a well-formed delegation with irreflexive base enforcement, no
+    agent can be punished via a delegation chain originating from
+    itself. Acyclicity prevents laundering self-punishment through
+    intermediaries. *)
+
+Theorem no_self_delegation :
+  forall del a,
+    well_formed_delegation del ->
+    ~ reachable del a a.
+Proof.
+  intros del a [_ _ Hacyclic].
+  exact (Hacyclic a).
+Qed.
+
+(** Reachability composes transitively. *)
+
+Lemma reachable_trans :
+  forall del a b c,
+    reachable del a b ->
+    reachable del b c ->
+    reachable del a c.
+Proof.
+  intros del a b c Hab Hbc.
+  induction Hab as [a' b' Hdel | a' b' m Hdel Hbm IH].
+  - exact (reach_trans del a' b' c Hdel Hbc).
+  - exact (reach_trans del a' b' c Hdel (IH Hbc)).
+Qed.
+
+(** If A delegates (transitively) to B, then B does not delegate
+    back to A. *)
+
+Theorem delegation_no_collusion :
+  forall del a b,
+    well_formed_delegation del ->
+    reachable del a b ->
+    ~ reachable del b a.
+Proof.
+  intros del a b [_ _ Hacyclic] Hab Hba.
+  exact (Hacyclic a (reachable_trans del a b a Hab Hba)).
+Qed.
 
 (** Enforcement authority may pass through multiple delegates:
     A delegates to B, B delegates to C, etc.  We model chains as
