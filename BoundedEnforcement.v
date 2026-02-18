@@ -3313,3 +3313,91 @@ Lemma high_burden_fails :
 Proof.
   unfold burden_met, high_burden_same_evidence. simpl. lia.
 Qed.
+
+(** * Procedural Requirements *)
+
+(** Enforcement authority is not a primitive boolean but is derived
+    from institutional predicates: jurisdiction, standing, and
+    judicial authorization. *)
+
+Record InstitutionalAuth := mkInstitutionalAuth {
+  ia_base          : DeonticSystem;
+  ia_jurisdiction  : Agent -> Agent -> bool;
+  ia_standing      : Agent -> Obligation -> bool;
+  ia_judicial_auth : Agent -> Agent -> Obligation -> bool
+}.
+
+(** Enforcement is *procedurally authorized* when all three
+    institutional predicates hold. *)
+
+Definition procedurally_authorized (ia : InstitutionalAuth)
+  (enforcer target : Agent) (o : Obligation) : Prop :=
+  ia_jurisdiction ia enforcer target = true /\
+  ia_standing ia enforcer o = true /\
+  ia_judicial_auth ia enforcer target o = true.
+
+(** An institutional system is *sound* when procedural authorization
+    implies base-system [may_enforce]. *)
+
+Definition institutionally_sound (ia : InstitutionalAuth) : Prop :=
+  forall e t o,
+    procedurally_authorized ia e t o ->
+    may_enforce (ia_base ia) e t = true.
+
+(** An institutional system is *complete* when [may_enforce] implies
+    procedural authorization for some obligation. *)
+
+Definition institutionally_complete (ia : InstitutionalAuth) : Prop :=
+  forall e t,
+    may_enforce (ia_base ia) e t = true ->
+    exists o, procedurally_authorized ia e t o.
+
+(** Witness: Taiidan's authority over Kushan is derived from
+    jurisdiction (same galactic sector), standing (treaty signatory),
+    and judicial authorization (Galactic Council ruling). *)
+
+Definition homeworld_institutional := mkInstitutionalAuth
+  homeworld_system
+  (fun enforcer target =>
+    agent_eqb enforcer taiidan && agent_eqb target kushan)
+  (fun agent obl =>
+    agent_eqb agent taiidan && obligation_eqb obl treaty_no_hyperspace)
+  (fun enforcer target obl =>
+    agent_eqb enforcer taiidan && agent_eqb target kushan &&
+    obligation_eqb obl treaty_no_hyperspace).
+
+Lemma taiidan_procedurally_authorized :
+  procedurally_authorized homeworld_institutional
+    taiidan kushan treaty_no_hyperspace.
+Proof.
+  unfold procedurally_authorized, homeworld_institutional. simpl. auto.
+Qed.
+
+Lemma homeworld_institutional_sound :
+  institutionally_sound homeworld_institutional.
+Proof.
+  intros e t o [Hjur [Hstand Hjud]].
+  unfold homeworld_institutional in *. simpl in *.
+  destruct (agent_eqb_spec e taiidan); destruct (agent_eqb_spec t kushan);
+    subst; simpl in *; try discriminate.
+  unfold homeworld_system. simpl. reflexivity.
+Qed.
+
+(** Without judicial authorization, enforcement is not procedurally
+    authorized. *)
+
+Definition no_judicial_auth := mkInstitutionalAuth
+  homeworld_system
+  (fun enforcer target =>
+    agent_eqb enforcer taiidan && agent_eqb target kushan)
+  (fun agent obl =>
+    agent_eqb agent taiidan && obligation_eqb obl treaty_no_hyperspace)
+  (fun _ _ _ => false).
+
+Lemma no_judicial_not_authorized :
+  ~ procedurally_authorized no_judicial_auth
+      taiidan kushan treaty_no_hyperspace.
+Proof.
+  unfold procedurally_authorized, no_judicial_auth. simpl.
+  intros [_ [_ H]]. discriminate.
+Qed.
