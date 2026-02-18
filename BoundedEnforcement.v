@@ -1852,3 +1852,75 @@ Proof.
              responses extermination_response Hin extermination_unbounded).
   - right. unfold bounded, extermination_response, homeworld_system. simpl. lia.
 Qed.
+
+(** * Deontic Modalities *)
+
+(** Standard deontic modalities: obligatory, permitted, forbidden. *)
+
+Inductive DeonticModality :=
+  | OBL  (* obligatory *)
+  | PERM (* permitted *)
+  | FORB. (* forbidden *)
+
+(** A [NormativeStatus] assigns a modality to an agent-obligation pair. *)
+
+Definition NormativeStatus := Agent -> Obligation -> DeonticModality.
+
+(** Consistency of modalities: forbidden and obligatory are dual
+    (obligatory implies permitted, forbidden and permitted are
+    exclusive, forbidden and obligatory are exclusive). *)
+
+Definition modally_consistent (ns : NormativeStatus) : Prop :=
+  (forall a o, ns a o = OBL -> ns a o <> FORB) /\
+  (forall a o, ns a o = FORB -> ns a o <> PERM) /\
+  (forall a o, ns a o = OBL -> ns a o <> FORB).
+
+(** A normative status is *grounded* in a deontic system when:
+    - OBL matches [obligated],
+    - FORB means not [obligated] and not [may_enforce]. *)
+
+Definition grounded (ds : DeonticSystem) (ns : NormativeStatus) : Prop :=
+  (forall a o, ns a o = OBL -> obligated ds a o = true) /\
+  (forall a o, ns a o = FORB ->
+    obligated ds a o = false \/ may_enforce ds a (mkAgent 0) = false).
+
+(** Violation of a forbidden action is impossible in a grounded
+    coherent system: if the action is forbidden, the agent doesn't
+    bear the obligation, so coherence prevents violation. *)
+
+Theorem forbidden_no_violation :
+  forall ds ns a o,
+    grounded ds ns ->
+    coherent ds ->
+    ns a o = FORB ->
+    obligated ds a o = false ->
+    violated ds a o = false.
+Proof.
+  intros ds ns a o [_ Hforb] [Hcoh _] Hns Hobl.
+  destruct (violated ds a o) eqn:Hviol.
+  - apply Hcoh in Hviol. rewrite Hviol in Hobl. discriminate.
+  - reflexivity.
+Qed.
+
+(** Witness: in the homeworld system, Taiidan's status for the
+    hyperspace treaty is PERM (not obligated, no violation expected). *)
+
+Definition homeworld_norms : NormativeStatus :=
+  fun a o =>
+    if agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace
+    then OBL
+    else PERM.
+
+Lemma homeworld_norms_grounded :
+  grounded homeworld_system homeworld_norms.
+Proof.
+  split.
+  - intros a o H. unfold homeworld_norms in H.
+    unfold homeworld_system. simpl.
+    destruct (agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace).
+    + reflexivity.
+    + discriminate.
+  - intros a o H. unfold homeworld_norms in H.
+    destruct (agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace);
+      discriminate.
+Qed.
