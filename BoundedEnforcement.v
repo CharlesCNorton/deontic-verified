@@ -701,22 +701,22 @@ Qed.
 
 (** * The Main Theorem *)
 
-(** No authorized response that exceeds the severity cap is lawful.
-    Equivalently: enforcement authority (standing) never licenses
-    disproportionate punishment. *)
+(** Any response that exceeds the severity cap is not lawful.
+    Authorization is irrelevant: lawfulness requires boundedness,
+    and unboundedness contradicts it directly. *)
 
 Theorem no_unbounded_lawful :
   forall ds pr,
-    authorized ds pr ->
     unbounded ds pr ->
     ~ lawful ds pr.
 Proof.
-  intros ds pr Hauth Hunb Hlaw.
+  intros ds pr Hunb Hlaw.
   assert (Hbnd := lawful_bounded ds pr Hlaw).
   exact (bounded_unbounded_exclusive ds pr (conj Hbnd Hunb)).
 Qed.
 
-(** Non-triviality: the hypothesis [authorized ds pr] is satisfiable. *)
+(** Non-triviality: the hypothesis is satisfiable — there exist
+    authorized-yet-unbounded responses. *)
 Lemma no_unbounded_lawful_nontrivial_auth :
   exists ds pr, authorized ds pr /\ unbounded ds pr.
 Proof.
@@ -739,9 +739,8 @@ Qed.
 Corollary kharak_extermination_unlawful :
   ~ lawful homeworld_system extermination_response.
 Proof.
-  apply no_unbounded_lawful.
-  - exact extermination_authorized.
-  - exact extermination_unbounded.
+  exact (no_unbounded_lawful homeworld_system extermination_response
+           extermination_unbounded).
 Qed.
 
 (** * Strengthened Aggregate Theorem *)
@@ -1798,7 +1797,7 @@ Proof. reflexivity. Qed.
 
     (1) Every individual lawful response has severity <= cap.
     (2) The aggregate lawful severity from [n] enforcers is <= n * cap.
-    (3) No authorized-but-unbounded response is lawful.
+    (3) No unbounded response is lawful.
     (4) In a delegation hierarchy, the chain cap is bounded by the
         base system cap.
     (5) Enforcement outside the temporal window is invalid. *)
@@ -1812,8 +1811,7 @@ Theorem bounded_enforcement_synthesis :
       all_target_same tgt obl responses ->
       total_severity responses <= length responses * severity_cap ds obl)
     /\
-    (forall pr,
-      authorized ds pr -> unbounded ds pr -> ~ lawful ds pr)
+    (forall pr, unbounded ds pr -> ~ lawful ds pr)
     /\
     (forall del obl chain,
       ds_base del = ds ->
