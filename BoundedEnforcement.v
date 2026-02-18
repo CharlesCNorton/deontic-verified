@@ -548,6 +548,31 @@ Proof.
     lia.
 Qed.
 
+(** A [TargetedResponses] record structurally guarantees that all
+    responses target the same agent for the same obligation. *)
+
+Record TargetedResponses := mkTargetedResponses {
+  tr_target   : Agent;
+  tr_cause    : Obligation;
+  tr_responses : list PunitiveResponse;
+  tr_invariant : forall pr, In pr tr_responses ->
+    target pr = tr_target /\ cause pr = tr_cause
+}.
+
+(** Aggregate bound using the structural type — no propositional
+    side condition needed. *)
+Theorem targeted_aggregate_bound :
+  forall ds (tr : TargetedResponses),
+    all_lawful ds (tr_responses tr) ->
+    total_severity (tr_responses tr) <=
+      length (tr_responses tr) * severity_cap ds (tr_cause tr).
+Proof.
+  intros ds tr Hlawful.
+  apply (aggregate_enforcement_bound ds (tr_target tr) (tr_cause tr)).
+  - exact Hlawful.
+  - exact (tr_invariant tr).
+Qed.
+
 (** Witness: two lawful responses to the hyperspace violation. *)
 Definition two_responses := [proportional_response; maximal_response].
 
