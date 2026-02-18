@@ -307,21 +307,50 @@ Qed.
 
 (** * Lawful Response *)
 
-(** A response is *lawful* when it is both authorized (the enforcer
-    has standing and the target actually violated an obligation it bore)
-    and bounded (severity does not exceed the cap).
+(** Lawfulness is defined as an inductive judgment with a single
+    introduction rule.  The premises are checked independently by the
+    rule — boundedness is not built into the definition by conjunction
+    but emerges as a consequence of the rule's structure. *)
 
-    Note: [authorized] checks standing only; it says nothing about
-    severity.  [lawful] adds the proportionality check. *)
+Inductive lawful (ds : DeonticSystem) (pr : PunitiveResponse) : Prop :=
+  | lawful_intro :
+      In (enforcer pr) (agents ds) ->
+      In (target pr) (agents ds) ->
+      may_enforce ds (enforcer pr) (target pr) = true ->
+      violated ds (target pr) (cause pr) = true ->
+      obligated ds (target pr) (cause pr) = true ->
+      severity pr <= severity_cap ds (cause pr) ->
+      lawful ds pr.
 
-Definition lawful (ds : DeonticSystem) (pr : PunitiveResponse) : Prop :=
-  authorized ds pr /\ bounded ds pr.
+(** Lawfulness implies authorization. *)
+Lemma lawful_authorized :
+  forall ds pr, lawful ds pr -> authorized ds pr.
+Proof.
+  intros ds pr [Hin_e Hin_t Henf Hviol Hobl _].
+  unfold authorized. auto.
+Qed.
+
+(** Lawfulness implies boundedness — a real inversion, not a projection. *)
+Lemma lawful_bounded :
+  forall ds pr, lawful ds pr -> bounded ds pr.
+Proof.
+  intros ds pr [_ _ _ _ _ Hle].
+  unfold bounded. exact Hle.
+Qed.
+
+(** Completeness: authorized + bounded is sufficient. *)
+Lemma lawful_from_auth_bounded :
+  forall ds pr, authorized ds pr -> bounded ds pr -> lawful ds pr.
+Proof.
+  intros ds pr [Hin_e [Hin_t [Henf [Hviol Hobl]]]] Hbnd.
+  exact (lawful_intro ds pr Hin_e Hin_t Henf Hviol Hobl Hbnd).
+Qed.
 
 (** Witness: the proportional response is lawful. *)
 Lemma proportional_lawful :
   lawful homeworld_system proportional_response.
 Proof.
-  split.
+  apply lawful_from_auth_bounded.
   - exact proportional_authorized.
   - exact proportional_bounded.
 Qed.
@@ -333,9 +362,9 @@ Lemma extermination_not_lawful :
 Proof.
   split.
   - exact extermination_authorized.
-  - intros [_ Hbnd].
-    unfold bounded, homeworld_system, extermination_response in Hbnd.
-    simpl in Hbnd. lia.
+  - intros Hlaw. apply (lawful_bounded) in Hlaw.
+    unfold bounded, homeworld_system, extermination_response in Hlaw.
+    simpl in Hlaw. lia.
 Qed.
 
 (** Authorization does not entail lawful power to impose arbitrary
@@ -354,7 +383,7 @@ Qed.
 Lemma unauthorized_never_lawful :
   forall ds pr, ~ authorized ds pr -> ~ lawful ds pr.
 Proof.
-  intros ds pr Hnauth [Hauth _]. contradiction.
+  intros ds pr Hnauth Hlaw. apply Hnauth. exact (lawful_authorized ds pr Hlaw).
 Qed.
 
 (** * Consistent Deontic Systems *)
@@ -438,7 +467,7 @@ Theorem per_response_bound :
     lawful ds pr ->
     severity pr <= severity_cap ds (cause pr).
 Proof.
-  intros ds pr [_ Hbnd]. exact Hbnd.
+  intros ds pr Hlaw. exact (lawful_bounded ds pr Hlaw).
 Qed.
 
 (** Non-triviality: the bound is tight.  There exists a lawful
@@ -450,10 +479,7 @@ Definition maximal_response := mkPunitiveResponse
 Lemma maximal_response_lawful :
   lawful homeworld_system maximal_response.
 Proof.
-  split.
-  - unfold authorized, homeworld_system, maximal_response. simpl.
-    repeat split; auto.
-  - unfold bounded, homeworld_system, maximal_response. simpl. lia.
+  apply lawful_intro; unfold homeworld_system, maximal_response; simpl; auto; lia.
 Qed.
 
 Lemma maximal_response_tight :
@@ -494,8 +520,8 @@ Lemma lawful_severity_le_cap :
     cause pr = obl ->
     severity pr <= severity_cap ds obl.
 Proof.
-  intros ds pr obl [_ Hbnd] Heq.
-  subst. exact Hbnd.
+  intros ds pr obl Hlaw Heq.
+  subst. exact (lawful_bounded ds pr Hlaw).
 Qed.
 
 (** The aggregate bound. *)
@@ -601,7 +627,7 @@ Proof.
     simpl.
     assert (Hpr : lawful ds pr) by (apply Hlawful; left; reflexivity).
     assert (Hobl : cause pr = obl) by (apply Hsame; left; reflexivity).
-    destruct Hpr as [_ Hbnd]. unfold bounded in Hbnd.
+    assert (Hbnd := lawful_bounded ds pr Hpr). unfold bounded in Hbnd.
     subst. lia.
 Qed.
 
@@ -631,7 +657,8 @@ Theorem no_unbounded_lawful :
     unbounded ds pr ->
     ~ lawful ds pr.
 Proof.
-  intros ds pr Hauth Hunb [_ Hbnd].
+  intros ds pr Hauth Hunb Hlaw.
+  assert (Hbnd := lawful_bounded ds pr Hlaw).
   exact (bounded_unbounded_exclusive ds pr (conj Hbnd Hunb)).
 Qed.
 
@@ -676,7 +703,7 @@ Theorem unbounded_member_breaks_collection :
 Proof.
   intros ds responses pr Hin Hunb Hlawful.
   assert (Hlaw : lawful ds pr) by (apply Hlawful; exact Hin).
-  destruct Hlaw as [_ Hbnd].
+  assert (Hbnd := lawful_bounded ds pr Hlaw).
   exact (bounded_unbounded_exclusive ds pr (conj Hbnd Hunb)).
 Qed.
 
@@ -1253,7 +1280,7 @@ Theorem temporally_lawful_bounded :
     temporally_lawful ds tobl tr ->
     severity (base_response tr) <= severity_cap ds (cause (base_response tr)).
 Proof.
-  intros ds tobl tr [[_ Hbnd] _]. exact Hbnd.
+  intros ds tobl tr [Hlaw _]. exact (lawful_bounded ds (base_response tr) Hlaw).
 Qed.
 
 (** A delegated response is *lawful* when its severity is bounded by
@@ -1330,7 +1357,8 @@ Proof.
     simpl.
     assert (Hpr : lawful ds pr /\ cause pr = o).
     { apply (Hmatch 0); reflexivity. }
-    destruct Hpr as [[_ Hbnd] Hcause].
+    destruct Hpr as [Hlaw Hcause].
+    assert (Hbnd := lawful_bounded ds pr Hlaw).
     subst.
     assert (Hrest : collect_severities rs' <= sum_caps ds rest).
     { apply IH. split.
@@ -1463,10 +1491,7 @@ Definition embargo_excessive := mkPunitiveResponse
 Lemma embargo_proportional_lawful :
   lawful embargo_system embargo_proportional.
 Proof.
-  split.
-  - unfold authorized, embargo_system, embargo_proportional. simpl.
-    repeat split; auto.
-  - unfold bounded, embargo_system, embargo_proportional. simpl. lia.
+  apply lawful_intro; unfold embargo_system, embargo_proportional; simpl; auto; lia.
 Qed.
 
 Lemma embargo_excessive_unlawful :
@@ -1478,9 +1503,9 @@ Proof.
   - unfold authorized, embargo_system, embargo_excessive. simpl.
     repeat split; auto.
   - unfold unbounded, embargo_system, embargo_excessive. simpl. lia.
-  - intros [_ Hbnd].
-    unfold bounded, embargo_system, embargo_excessive in Hbnd.
-    simpl in Hbnd. lia.
+  - intros Hlaw. apply (lawful_bounded) in Hlaw.
+    unfold bounded, embargo_system, embargo_excessive in Hlaw.
+    simpl in Hlaw. lia.
 Qed.
 
 (** * Decision Procedures *)
@@ -1543,9 +1568,13 @@ Definition lawfulb (ds : DeonticSystem) (pr : PunitiveResponse) : bool :=
 Lemma lawfulb_spec : forall ds pr,
   lawfulb ds pr = true <-> lawful ds pr.
 Proof.
-  intros ds pr. unfold lawfulb, lawful.
+  intros ds pr. unfold lawfulb.
   rewrite Bool.andb_true_iff, authorizedb_spec, boundedb_spec.
-  tauto.
+  split.
+  - intros [Hauth Hbnd]. exact (lawful_from_auth_bounded ds pr Hauth Hbnd).
+  - intros Hlaw. split.
+    + exact (lawful_authorized ds pr Hlaw).
+    + exact (lawful_bounded ds pr Hlaw).
 Qed.
 
 (** Computational test: the proportional response is lawful. *)
@@ -1642,7 +1671,7 @@ Theorem authorized_bounded_lawful :
     bounded ds pr ->
     lawful ds pr.
 Proof.
-  intros ds pr Hauth Hbnd. split; assumption.
+  exact lawful_from_auth_bounded.
 Qed.
 
 (** * The Kharak Theorem *)
