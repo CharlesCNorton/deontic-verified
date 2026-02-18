@@ -2199,3 +2199,153 @@ Proof.
   destruct Hlaw as [_ _ _ Hviol_true _ _].
   subst. rewrite Hviol in Hviol_true. discriminate.
 Qed.
+
+(** * Proportionality-Derived Caps *)
+
+(** Harm is a natural number measuring the damage caused by a
+    violation.  We use [nat] directly so arithmetic is available. *)
+
+Definition Harm := nat.
+
+(** A proportionality function maps violation harm to the maximum
+    lawful punishment.  The cap is no longer a free parameter —
+    it is derived from the harm assessment. *)
+
+Definition ProportionalityFn := Harm -> Severity.
+
+(** A proportionality function is *monotone*: greater harm permits
+    greater (or equal) punishment. *)
+
+Definition monotone_proportionality (f : ProportionalityFn) : Prop :=
+  forall h1 h2, h1 <= h2 -> f h1 <= f h2.
+
+(** A proportionality function is *non-trivial*: some positive harm
+    level yields a positive cap. *)
+
+Definition nontrivial_proportionality (f : ProportionalityFn) : Prop :=
+  exists h, h > 0 /\ f h > 0.
+
+(** A [ProportionalSystem] bundles a deontic system with a harm
+    assessment and a proportionality function.  The key constraint
+    [ps_cap_derived] forces the severity cap to equal the
+    proportionality function applied to the harm of the obligation.
+    The cap is no longer axiomatic — it is determined by harm. *)
+
+Record ProportionalSystem := mkProportionalSystem {
+  ps_base           : DeonticSystem;
+  harm_of           : Obligation -> Harm;
+  proportionality   : ProportionalityFn;
+  ps_cap_derived    : forall o,
+    severity_cap ps_base o = proportionality (harm_of o)
+}.
+
+(** In a proportional system, lawful punishment is bounded by the
+    proportionality function applied to the violation's harm. *)
+
+Theorem proportional_bound :
+  forall ps pr,
+    lawful (ps_base ps) pr ->
+    severity pr <= proportionality ps (harm_of ps (cause pr)).
+Proof.
+  intros ps pr Hlaw.
+  assert (Hbnd := lawful_bounded (ps_base ps) pr Hlaw).
+  unfold bounded in Hbnd.
+  rewrite (ps_cap_derived ps) in Hbnd.
+  exact Hbnd.
+Qed.
+
+(** If the proportionality function is monotone and obligation A's
+    harm exceeds obligation B's harm, then the cap for A is at
+    least as large as the cap for B. *)
+
+Theorem monotone_caps :
+  forall ps o1 o2,
+    monotone_proportionality (proportionality ps) ->
+    harm_of ps o1 <= harm_of ps o2 ->
+    severity_cap (ps_base ps) o1 <= severity_cap (ps_base ps) o2.
+Proof.
+  intros ps o1 o2 Hmono Hharm.
+  rewrite (ps_cap_derived ps o1).
+  rewrite (ps_cap_derived ps o2).
+  exact (Hmono (harm_of ps o1) (harm_of ps o2) Hharm).
+Qed.
+
+(** Witness: the homeworld system as a proportional system.
+    Harm of the hyperspace treaty violation is 5; proportionality
+    function is [fun h => 2 * h], giving cap = 10. *)
+
+Definition homeworld_proportionality : ProportionalityFn :=
+  fun h => 2 * h.
+
+Definition homeworld_harm : Obligation -> Harm :=
+  fun o =>
+    if obligation_eqb o treaty_no_hyperspace then 5 else 0.
+
+Lemma homeworld_proportional_cap_derived :
+  forall o,
+    severity_cap homeworld_system o =
+    homeworld_proportionality (homeworld_harm o).
+Proof.
+  intros o.
+  unfold homeworld_system, homeworld_proportionality, homeworld_harm. simpl.
+  destruct (obligation_eqb_spec o treaty_no_hyperspace); subst; simpl; lia.
+Qed.
+
+Definition homeworld_proportional : ProportionalSystem :=
+  mkProportionalSystem
+    homeworld_system
+    homeworld_harm
+    homeworld_proportionality
+    homeworld_proportional_cap_derived.
+
+(** The proportionality function is monotone. *)
+Lemma homeworld_proportionality_monotone :
+  monotone_proportionality homeworld_proportionality.
+Proof.
+  intros h1 h2 Hle. unfold homeworld_proportionality. lia.
+Qed.
+
+(** The proportionality function is non-trivial. *)
+Lemma homeworld_proportionality_nontrivial :
+  nontrivial_proportionality homeworld_proportionality.
+Proof.
+  exists 1. unfold homeworld_proportionality. split; lia.
+Qed.
+
+(** Instantiation: the proportional response (severity 5) is bounded
+    by 2 * harm(5) = 10.  The extermination (severity 100) exceeds
+    the derived cap. *)
+
+Lemma proportional_response_within_derived_cap :
+  severity proportional_response <=
+  proportionality homeworld_proportional
+    (harm_of homeworld_proportional (cause proportional_response)).
+Proof.
+  apply proportional_bound. exact proportional_lawful.
+Qed.
+
+Lemma extermination_exceeds_derived_cap :
+  severity extermination_response >
+  proportionality homeworld_proportional
+    (harm_of homeworld_proportional (cause extermination_response)).
+Proof.
+  unfold homeworld_proportional, homeworld_proportionality,
+         homeworld_harm, extermination_response. simpl. lia.
+Qed.
+
+(** Counterexample: a non-monotone proportionality function where
+    greater harm yields a smaller cap. *)
+
+Definition pathological_proportionality : ProportionalityFn :=
+  fun h => if h <=? 5 then 100 else 1.
+
+Lemma pathological_not_monotone :
+  ~ monotone_proportionality pathological_proportionality.
+Proof.
+  intros H.
+  specialize (H 5 6).
+  unfold pathological_proportionality in H.
+  simpl in H.
+  assert (Habs : 100 <= 1) by (apply H; lia).
+  lia.
+Qed.
