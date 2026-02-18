@@ -3401,3 +3401,369 @@ Proof.
   unfold procedurally_authorized, no_judicial_auth. simpl.
   intros [_ [_ H]]. discriminate.
 Qed.
+
+(** * Collective Responsibility *)
+
+(** Agents may be composite: a group that bears joint liability.
+    A [CollectiveAgent] bundles individual agents into a group. *)
+
+Record CollectiveAgent := mkCollectiveAgent {
+  ca_id      : nat;
+  ca_members : list Agent
+}.
+
+(** A collective bears an obligation when all members bear it. *)
+
+Definition collectively_obligated (ds : DeonticSystem)
+  (ca : CollectiveAgent) (o : Obligation) : Prop :=
+  forall a, In a (ca_members ca) -> obligated ds a o = true.
+
+(** A collective has violated when any member has violated. *)
+
+Definition collectively_violated (ds : DeonticSystem)
+  (ca : CollectiveAgent) (o : Obligation) : Prop :=
+  exists a, In a (ca_members ca) /\ violated ds a o = true.
+
+(** Joint liability distributes punishment across members: each
+    member's share is bounded by the cap. *)
+
+Theorem joint_liability_bound :
+  forall ds ca o responses,
+    (forall pr, In pr responses ->
+      lawful ds pr /\ cause pr = o /\
+      exists a, In a (ca_members ca) /\ target pr = a) ->
+    total_severity responses <= length responses * severity_cap ds o.
+Proof.
+  intros ds ca o responses Hresp.
+  induction responses as [| pr rest IH].
+  - simpl. lia.
+  - simpl.
+    assert (Hpr := Hresp pr (or_introl eq_refl)).
+    destruct Hpr as [Hlaw [Hcause _]].
+    assert (Hbnd := lawful_bounded ds pr Hlaw).
+    unfold bounded in Hbnd. rewrite Hcause in Hbnd.
+    assert (Hrest : total_severity rest <= length rest * severity_cap ds o).
+    { apply IH. intros pr' Hin. apply Hresp. right. exact Hin. }
+    lia.
+Qed.
+
+(** Witness: the Kushan fleet as a collective. *)
+
+Definition kushan_fleet := mkCollectiveAgent 100
+  [kushan; mkAgent 5; mkAgent 6].
+
+(** * Reparative Remedies *)
+
+(** Alongside punitive responses, the framework models reparative
+    remedies: compensation, restitution, and rehabilitation. *)
+
+Inductive RemedyType :=
+  | Punitive
+  | Compensatory
+  | Restitutive
+  | Rehabilitative.
+
+Record Remedy := mkRemedy {
+  rm_type      : RemedyType;
+  rm_enforcer  : Agent;
+  rm_target    : Agent;
+  rm_cause     : Obligation;
+  rm_magnitude : nat
+}.
+
+(** A remedy assignment specifies different caps for different
+    remedy types. *)
+
+Record RemedyPolicy := mkRemedyPolicy {
+  rp_base : DeonticSystem;
+  rp_cap  : Obligation -> RemedyType -> nat
+}.
+
+(** A remedy is *permissible* when its magnitude is within the
+    type-specific cap. *)
+
+Definition permissible_remedy (rp : RemedyPolicy) (rm : Remedy) : Prop :=
+  rm_magnitude rm <= rp_cap rp (rm_cause rm) (rm_type rm).
+
+Fixpoint total_magnitude (remedies : list Remedy) : nat :=
+  match remedies with
+  | [] => 0
+  | rm :: rest => rm_magnitude rm + total_magnitude rest
+  end.
+
+(** Total remedies (all types combined) are bounded by the sum
+    of their respective caps times the number of remedies. *)
+
+Theorem total_remedy_bound :
+  forall rp remedies o,
+    (forall rm, In rm remedies -> permissible_remedy rp rm) ->
+    (forall rm, In rm remedies -> rm_cause rm = o) ->
+    total_magnitude remedies <=
+    length remedies *
+      (rp_cap rp o Punitive + rp_cap rp o Compensatory +
+       rp_cap rp o Restitutive + rp_cap rp o Rehabilitative).
+Proof.
+  intros rp remedies o Hperm Hcause.
+  induction remedies as [| rm rest IH].
+  - simpl. lia.
+  - simpl.
+    assert (Hp := Hperm rm (or_introl eq_refl)).
+    unfold permissible_remedy in Hp.
+    assert (Hc := Hcause rm (or_introl eq_refl)). rewrite Hc in Hp.
+    assert (Hrest := IH
+      (fun rm' Hin => Hperm rm' (or_intror Hin))
+      (fun rm' Hin => Hcause rm' (or_intror Hin))).
+    destruct (rm_type rm); lia.
+Qed.
+
+(** Witness: hyperspace violation permits punitive cap 10 and
+    compensatory cap 5. *)
+
+Definition homeworld_remedy_policy := mkRemedyPolicy
+  homeworld_system
+  (fun o t =>
+    if obligation_eqb o treaty_no_hyperspace then
+      match t with
+      | Punitive      => 10
+      | Compensatory  => 5
+      | Restitutive   => 0
+      | Rehabilitative => 0
+      end
+    else 0).
+
+Lemma punitive_remedy_permissible :
+  permissible_remedy homeworld_remedy_policy
+    (mkRemedy Punitive taiidan kushan treaty_no_hyperspace 8).
+Proof.
+  unfold permissible_remedy, homeworld_remedy_policy. simpl. lia.
+Qed.
+
+Lemma compensatory_remedy_permissible :
+  permissible_remedy homeworld_remedy_policy
+    (mkRemedy Compensatory taiidan kushan treaty_no_hyperspace 5).
+Proof.
+  unfold permissible_remedy, homeworld_remedy_policy. simpl. lia.
+Qed.
+
+(** * Dynamic Norm Change *)
+
+(** Obligations can be created, amended, and revoked over time. *)
+
+Inductive NormEvent :=
+  | CreateObligation (o : Obligation) (a : Agent) (cap : Severity) (t : Time)
+  | RevokeObligation (o : Obligation) (t : Time)
+  | AmendCap (o : Obligation) (new_cap : Severity) (t : Time).
+
+(** A [DynamicNormSystem] is a base system plus a history of events. *)
+
+Record DynamicNormSystem := mkDynamicNormSystem {
+  dns_base   : DeonticSystem;
+  dns_events : list NormEvent
+}.
+
+(** An obligation is *active at time t* if it was created before t
+    and not revoked before t.  (Simple model: last event wins.) *)
+
+Fixpoint obligation_created_before
+  (events : list NormEvent) (o : Obligation) (t : Time) : bool :=
+  match events with
+  | [] => false
+  | CreateObligation o' _ _ t' :: rest =>
+      if obligation_eqb o o' && (t' <=? t) then true
+      else obligation_created_before rest o t
+  | _ :: rest => obligation_created_before rest o t
+  end.
+
+Fixpoint obligation_revoked_before
+  (events : list NormEvent) (o : Obligation) (t : Time) : bool :=
+  match events with
+  | [] => false
+  | RevokeObligation o' t' :: rest =>
+      if obligation_eqb o o' && (t' <=? t) then true
+      else obligation_revoked_before rest o t
+  | _ :: rest => obligation_revoked_before rest o t
+  end.
+
+Definition dynamically_active (dns : DynamicNormSystem)
+  (o : Obligation) (t : Time) : Prop :=
+  obligation_created_before (dns_events dns) o t = true /\
+  obligation_revoked_before (dns_events dns) o t = false.
+
+(** Enforcement of a revoked obligation is invalid. *)
+
+Theorem revoked_not_enforceable :
+  forall dns o t,
+    obligation_revoked_before (dns_events dns) o t = true ->
+    ~ dynamically_active dns o t.
+Proof.
+  intros dns o t Hrev [_ Hnrev]. rewrite Hrev in Hnrev. discriminate.
+Qed.
+
+(** * Delegation Revocation *)
+
+(** Delegation can be explicitly revoked, not just expired. *)
+
+Inductive DelegationEvent :=
+  | GrantDelegation (delegator delegate : Agent) (t : Time)
+  | RevokeDelegation (delegator delegate : Agent) (t : Time).
+
+Fixpoint delegation_granted_before
+  (events : list DelegationEvent) (a b : Agent) (t : Time) : bool :=
+  match events with
+  | [] => false
+  | GrantDelegation a' b' t' :: rest =>
+      if agent_eqb a a' && agent_eqb b b' && (t' <=? t) then true
+      else delegation_granted_before rest a b t
+  | _ :: rest => delegation_granted_before rest a b t
+  end.
+
+Fixpoint delegation_revoked_before
+  (events : list DelegationEvent) (a b : Agent) (t : Time) : bool :=
+  match events with
+  | [] => false
+  | RevokeDelegation a' b' t' :: rest =>
+      if agent_eqb a a' && agent_eqb b b' && (t' <=? t) then true
+      else delegation_revoked_before rest a b t
+  | _ :: rest => delegation_revoked_before rest a b t
+  end.
+
+Definition delegation_active_at
+  (events : list DelegationEvent) (a b : Agent) (t : Time) : Prop :=
+  delegation_granted_before events a b t = true /\
+  delegation_revoked_before events a b t = false.
+
+Theorem revoked_delegation_inactive :
+  forall events a b t,
+    delegation_revoked_before events a b t = true ->
+    ~ delegation_active_at events a b t.
+Proof.
+  intros events a b t Hrev [_ Hnrev]. rewrite Hrev in Hnrev. discriminate.
+Qed.
+
+(** * Enforcement Cost *)
+
+(** Enforcement has a cost; enforcers will not punish if the cost
+    exceeds the benefit. *)
+
+Record CostModel := mkCostModel {
+  cm_base          : DeonticSystem;
+  cm_cost          : Agent -> Agent -> Obligation -> Severity -> nat;
+  cm_budget        : Agent -> nat
+}.
+
+(** An enforcer can afford a response when its cost is within budget. *)
+
+Definition affordable (cm : CostModel) (pr : PunitiveResponse) : Prop :=
+  cm_cost cm (enforcer pr) (target pr) (cause pr) (severity pr) <=
+  cm_budget cm (enforcer pr).
+
+(** Unaffordable enforcement does not occur. *)
+
+Definition cost_feasible_enforcement (cm : CostModel)
+  (pr : PunitiveResponse) : Prop :=
+  lawful (cm_base cm) pr /\ affordable cm pr.
+
+Theorem unaffordable_no_enforcement :
+  forall cm pr,
+    ~ affordable cm pr ->
+    ~ cost_feasible_enforcement cm pr.
+Proof.
+  intros cm pr Hna [_ Ha]. exact (Hna Ha).
+Qed.
+
+(** * Recidivism and History *)
+
+(** An offense history tracks past violations per agent. *)
+
+Definition OffenseHistory := Agent -> Obligation -> nat.
+
+(** A [RecidivismPolicy] escalates caps based on offense count,
+    but the escalation must be bounded (linear). *)
+
+Record RecidivismPolicy := mkRecidivismPolicy {
+  rec_base       : DeonticSystem;
+  rec_history    : OffenseHistory;
+  rec_escalation : Obligation -> nat -> Severity
+}.
+
+(** The escalation is *linear* when it is bounded by a constant
+    times the offense count. *)
+
+Definition linear_escalation (rp : RecidivismPolicy) (k : nat) : Prop :=
+  forall o n, rec_escalation rp o n <= k * (S n).
+
+(** Escalated severity is bounded by the linear escalation cap. *)
+
+Theorem recidivism_linear_bound :
+  forall rp k o a,
+    linear_escalation rp k ->
+    rec_escalation rp o (rec_history rp a o) <=
+      k * S (rec_history rp a o).
+Proof.
+  intros rp k o a Hlin. exact (Hlin o (rec_history rp a o)).
+Qed.
+
+(** * Severity Zero vs No Punishment *)
+
+(** Distinguish between severity-zero punishment (enforcement
+    occurred but with no magnitude) and absence of enforcement. *)
+
+Inductive EnforcementOutcome :=
+  | NoEnforcement
+  | Enforced (s : Severity).
+
+Definition outcome_severity (eo : EnforcementOutcome) : nat :=
+  match eo with
+  | NoEnforcement => 0
+  | Enforced s => s
+  end.
+
+(** An enforcement occurred iff the outcome is [Enforced _]. *)
+
+Definition enforcement_occurred (eo : EnforcementOutcome) : Prop :=
+  match eo with
+  | NoEnforcement => False
+  | Enforced _ => True
+  end.
+
+Lemma no_enforcement_no_occurrence :
+  ~ enforcement_occurred NoEnforcement.
+Proof.
+  simpl. auto.
+Qed.
+
+Lemma zero_enforcement_still_occurred :
+  enforcement_occurred (Enforced 0).
+Proof.
+  simpl. exact I.
+Qed.
+
+(** * Enforcer-Target Distinctness *)
+
+(** Require enforcer <> target directly in the lawfulness judgment,
+    making the constraint structural rather than relying on
+    [may_enforce] conventions. *)
+
+Definition structurally_lawful (ds : DeonticSystem)
+  (pr : PunitiveResponse) : Prop :=
+  lawful ds pr /\ enforcer pr <> target pr.
+
+(** In a consistent system, lawful responses are already
+    structurally lawful (irreflexive enforcement prevents
+    self-punishment). *)
+
+Theorem consistent_lawful_structural :
+  forall ds pr,
+    consistent ds ->
+    lawful ds pr ->
+    structurally_lawful ds pr.
+Proof.
+  intros ds pr [_ Hirr _ _] Hlaw.
+  split.
+  - exact Hlaw.
+  - intros Heq.
+    destruct Hlaw as [_ _ Henf _ _ _].
+    rewrite Heq in Henf.
+    specialize (Hirr (target pr)).
+    rewrite Henf in Hirr. discriminate.
+Qed.
