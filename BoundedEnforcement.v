@@ -1113,6 +1113,49 @@ Proof.
   - exact three_hop_valid_chain.
 Qed.
 
+Lemma three_hop_delegates_to_shape :
+  forall a b,
+    delegates_to three_hop_delegation a b = true ->
+    (a = taiidan /\ b = turanic) \/ (a = turanic /\ b = kadeshi).
+Proof.
+  intros a b H.
+  unfold three_hop_delegation in H. simpl in H.
+  rewrite Bool.orb_true_iff in H.
+  destruct H as [H | H].
+  - destruct (agent_eqb_spec a taiidan); destruct (agent_eqb_spec b turanic);
+      subst; simpl in *; try discriminate. left. auto.
+  - destruct (agent_eqb_spec a turanic); destruct (agent_eqb_spec b kadeshi);
+      subst; simpl in *; try discriminate. right. auto.
+Qed.
+
+Lemma three_hop_reachable_increasing :
+  forall a b,
+    reachable three_hop_delegation a b ->
+    agent_id a < agent_id b.
+Proof.
+  intros a b H.
+  induction H as [a' b' Hdel | a' b' c Hdel Hreach IH].
+  - destruct (three_hop_delegates_to_shape a' b' Hdel) as [[-> ->] | [-> ->]];
+      simpl; lia.
+  - destruct (three_hop_delegates_to_shape a' b' Hdel) as [[-> ->] | [-> ->]];
+      simpl in *; lia.
+Qed.
+
+Lemma three_hop_acyclic : acyclic three_hop_delegation.
+Proof.
+  intros a Hreach.
+  assert (H := three_hop_reachable_increasing a a Hreach). lia.
+Qed.
+
+Lemma three_hop_well_formed :
+  well_formed_delegation three_hop_delegation.
+Proof.
+  constructor.
+  - exact homeworld_consistent.
+  - exact three_hop_cap_monotone.
+  - exact three_hop_acyclic.
+Qed.
+
 (** The caps strictly decrease: 10 -> 5 -> 2. *)
 Lemma chain_strictly_decreasing :
   severity_cap homeworld_system treaty_no_hyperspace = 10 /\
