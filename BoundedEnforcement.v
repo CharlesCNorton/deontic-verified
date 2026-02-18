@@ -577,6 +577,48 @@ Proof.
   nia.
 Qed.
 
+(** A system satisfies *ne bis in idem* when at most one enforcer
+    may respond per violation. Under this constraint, aggregate
+    punishment for a single violation is bounded by the cap itself. *)
+
+Definition ne_bis_in_idem
+  (ds : DeonticSystem) (responses : list PunitiveResponse)
+  (tgt : Agent) (obl : Obligation) : Prop :=
+  all_target_same tgt obl responses /\
+  NoDup (map enforcer responses) /\
+  length responses <= 1.
+
+Theorem ne_bis_in_idem_bound :
+  forall ds tgt obl responses,
+    all_lawful ds responses ->
+    ne_bis_in_idem ds responses tgt obl ->
+    total_severity responses <= severity_cap ds obl.
+Proof.
+  intros ds tgt obl responses Hlawful [Hsame [Hnodup Hlen]].
+  destruct responses as [| pr rest].
+  - simpl. lia.
+  - simpl in Hlen. assert (rest = []) as -> by (destruct rest; [reflexivity | simpl in Hlen; lia]).
+    simpl.
+    assert (Hpr : lawful ds pr) by (apply Hlawful; left; reflexivity).
+    assert (Hobl : cause pr = obl) by (apply Hsame; left; reflexivity).
+    destruct Hpr as [_ Hbnd]. unfold bounded in Hbnd.
+    subst. lia.
+Qed.
+
+(** Witness: the homeworld system with a single response satisfies
+    ne bis in idem, bounding total severity to 10. *)
+Lemma homeworld_ne_bis_in_idem :
+  ne_bis_in_idem homeworld_system [proportional_response]
+    kushan treaty_no_hyperspace.
+Proof.
+  split; [| split].
+  - intros pr Hin. destruct Hin as [H | []]; subst; simpl; auto.
+  - simpl. constructor.
+    + intros [].
+    + constructor.
+  - simpl. lia.
+Qed.
+
 (** * The Main Theorem *)
 
 (** No authorized response that exceeds the severity cap is lawful.
