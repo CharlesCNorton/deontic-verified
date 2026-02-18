@@ -975,6 +975,67 @@ Proof.
   unfold three_hop_delegation, homeworld_system. simpl. auto.
 Qed.
 
+(** * Temporal Delegation *)
+
+(** Delegation authority may expire. A [TemporalDelegation] wraps a
+    delegation system with an expiration time per delegation pair. *)
+
+Record TemporalDelegation := mkTemporalDelegation {
+  td_base        : DelegationSystem;
+  delegation_expires : Agent -> Agent -> nat;
+  delegation_created : Agent -> Agent -> nat
+}.
+
+Definition delegation_active (td : TemporalDelegation)
+  (delegator delegate : Agent) (t : nat) : Prop :=
+  delegation_created td delegator delegate <= t /\
+  t < delegation_expires td delegator delegate.
+
+(** A delegated enforcement is temporally valid only if the delegation
+    is active at enforcement time. *)
+
+Definition temporally_valid_delegation (td : TemporalDelegation)
+  (delegator delegate : Agent) (t : nat) (pr : PunitiveResponse) : Prop :=
+  delegates_to (td_base td) delegator delegate = true /\
+  delegation_active td delegator delegate t /\
+  enforcer pr = delegate.
+
+(** Expired delegation confers no authority. *)
+
+Theorem expired_delegation_invalid :
+  forall td delegator delegate t pr,
+    t >= delegation_expires td delegator delegate ->
+    ~ temporally_valid_delegation td delegator delegate t pr.
+Proof.
+  intros td delegator delegate t pr Hlate [_ [[_ Hact] _]].
+  lia.
+Qed.
+
+(** Witness: Taiidan's delegation to Turanic expires at time 100.
+    Enforcement at time 200 is invalid. *)
+
+Definition homeworld_temporal_delegation := mkTemporalDelegation
+  homeworld_delegation
+  (fun _ _ => 100)
+  (fun _ _ => 0).
+
+Lemma turanic_delegation_expired_at_200 :
+  ~ temporally_valid_delegation homeworld_temporal_delegation
+      taiidan turanic 200 proportional_response.
+Proof.
+  apply expired_delegation_invalid. simpl. lia.
+Qed.
+
+(** Delegation active at time 50 is valid. *)
+Lemma turanic_delegation_active_at_50 :
+  temporally_valid_delegation homeworld_temporal_delegation
+    taiidan turanic 50 (mkPunitiveResponse turanic kushan treaty_no_hyperspace 3).
+Proof.
+  unfold temporally_valid_delegation, delegation_active,
+         homeworld_temporal_delegation, homeworld_delegation. simpl.
+  repeat split; lia.
+Qed.
+
 (** * Temporal Obligations and Enforcement Windows *)
 
 (** Obligations may have a temporal scope: they are created at some
