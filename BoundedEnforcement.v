@@ -2915,3 +2915,149 @@ Lemma no_exception_not_defeated :
 Proof.
   intros [er [Hin _]]. destruct Hin.
 Qed.
+
+(** * Severity Categories *)
+
+(** Punishment is not a bare number but belongs to a category.
+    Categories are ordered by escalation: diplomatic remedies must
+    be exhausted before economic measures, which must be exhausted
+    before military action. *)
+
+Inductive SeverityCategory :=
+  | Diplomatic
+  | Economic
+  | Military.
+
+Definition category_rank (c : SeverityCategory) : nat :=
+  match c with
+  | Diplomatic => 0
+  | Economic   => 1
+  | Military   => 2
+  end.
+
+Definition category_le (c1 c2 : SeverityCategory) : Prop :=
+  category_rank c1 <= category_rank c2.
+
+(** A typed punitive response carries both a severity magnitude
+    and a category. *)
+
+Record TypedResponse := mkTypedResponse {
+  tr_base     : PunitiveResponse;
+  tr_category : SeverityCategory
+}.
+
+(** A [SeverityPolicy] assigns to each obligation the maximum
+    permitted category and a magnitude cap per category. *)
+
+Record SeverityPolicy := mkSeverityPolicy {
+  sp_base         : DeonticSystem;
+  sp_max_category : Obligation -> SeverityCategory;
+  sp_category_cap : Obligation -> SeverityCategory -> Severity
+}.
+
+(** A typed response is *categorically lawful* when:
+    (1) the base response is lawful,
+    (2) the response category does not exceed the obligation's max,
+    (3) the severity does not exceed the per-category cap. *)
+
+Definition categorically_lawful (sp : SeverityPolicy)
+  (tr : TypedResponse) : Prop :=
+  lawful (sp_base sp) (tr_base tr) /\
+  category_le (tr_category tr)
+    (sp_max_category sp (cause (tr_base tr))) /\
+  severity (tr_base tr) <=
+    sp_category_cap sp (cause (tr_base tr)) (tr_category tr).
+
+(** Escalation constraint: military action requires that diplomatic
+    and economic remedies have been attempted.  We model this as:
+    for military responses, prior diplomatic and economic responses
+    must exist in the response history. *)
+
+Definition exhaustion_satisfied
+  (history : list TypedResponse) (tr : TypedResponse) : Prop :=
+  tr_category tr = Military ->
+  (exists d, In d history /\ tr_category d = Diplomatic) /\
+  (exists e, In e history /\ tr_category e = Economic).
+
+(** Categorically lawful responses are bounded by the per-category cap. *)
+
+Theorem categorical_bound :
+  forall sp tr,
+    categorically_lawful sp tr ->
+    severity (tr_base tr) <=
+      sp_category_cap sp (cause (tr_base tr)) (tr_category tr).
+Proof.
+  intros sp tr [_ [_ Hcap]]. exact Hcap.
+Qed.
+
+(** The category cannot exceed the obligation's maximum. *)
+
+Theorem categorical_escalation_bound :
+  forall sp tr,
+    categorically_lawful sp tr ->
+    category_le (tr_category tr)
+      (sp_max_category sp (cause (tr_base tr))).
+Proof.
+  intros sp tr [_ [Hcat _]]. exact Hcat.
+Qed.
+
+(** Witness: in the homeworld system, the hyperspace treaty allows
+    economic responses (cap 8) and diplomatic responses (cap 10),
+    but NOT military action. *)
+
+Definition homeworld_severity_policy := mkSeverityPolicy
+  homeworld_system
+  (fun o =>
+    if obligation_eqb o treaty_no_hyperspace then Economic
+    else Diplomatic)
+  (fun o c =>
+    if obligation_eqb o treaty_no_hyperspace then
+      match c with
+      | Diplomatic => 10
+      | Economic => 8
+      | Military => 0
+      end
+    else 0).
+
+(** A diplomatic response (severity 5) is categorically lawful. *)
+
+Lemma diplomatic_response_lawful :
+  categorically_lawful homeworld_severity_policy
+    (mkTypedResponse proportional_response Diplomatic).
+Proof.
+  unfold categorically_lawful, homeworld_severity_policy,
+         proportional_response, category_le. simpl.
+  split; [| split].
+  - exact proportional_lawful.
+  - lia.
+  - lia.
+Qed.
+
+(** A military response is NOT categorically lawful: the hyperspace
+    treaty only permits up to Economic measures. *)
+
+Lemma military_response_not_lawful :
+  ~ categorically_lawful homeworld_severity_policy
+      (mkTypedResponse proportional_response Military).
+Proof.
+  unfold categorically_lawful, homeworld_severity_policy,
+         proportional_response, category_le. simpl.
+  intros [_ [Hcat _]]. lia.
+Qed.
+
+(** An economic response at severity 8 exactly hits the category cap. *)
+
+Definition economic_response := mkPunitiveResponse
+  taiidan kushan treaty_no_hyperspace 8.
+
+Lemma economic_response_tight :
+  categorically_lawful homeworld_severity_policy
+    (mkTypedResponse economic_response Economic).
+Proof.
+  unfold categorically_lawful, homeworld_severity_policy,
+         economic_response, category_le. simpl.
+  split; [| split].
+  - apply lawful_intro; unfold homeworld_system; simpl; auto; lia.
+  - lia.
+  - lia.
+Qed.
