@@ -2349,3 +2349,186 @@ Proof.
   assert (Habs : 100 <= 1) by (apply H; lia).
   lia.
 Qed.
+
+(** * Graded Violations and Culpability *)
+
+(** Culpability levels, ordered from most to least blameworthy.
+    Each level carries a natural-number weight that scales the
+    effective severity cap. *)
+
+Inductive CulpabilityLevel :=
+  | Intentional
+  | Reckless
+  | Negligent
+  | StrictLiability.
+
+Definition culpability_weight (c : CulpabilityLevel) : nat :=
+  match c with
+  | Intentional     => 4
+  | Reckless        => 3
+  | Negligent       => 2
+  | StrictLiability => 1
+  end.
+
+(** Culpability is ordered: more blameworthy levels have strictly
+    higher weight. *)
+
+Definition more_culpable (c1 c2 : CulpabilityLevel) : Prop :=
+  culpability_weight c1 > culpability_weight c2.
+
+Lemma intentional_most_culpable :
+  forall c, c <> Intentional -> more_culpable Intentional c.
+Proof.
+  intros c Hne. unfold more_culpable.
+  destruct c; simpl; try lia.
+  exfalso. apply Hne. reflexivity.
+Qed.
+
+(** A [GradedDeonticSystem] replaces the boolean [violated] with a
+    function that returns [option CulpabilityLevel].  [None] means
+    no violation; [Some c] means a violation at culpability level [c]. *)
+
+Record GradedDeonticSystem := mkGradedDeonticSystem {
+  gds_agents       : list Agent;
+  gds_obligated    : Agent -> Obligation -> bool;
+  gds_violated     : Agent -> Obligation -> option CulpabilityLevel;
+  gds_may_enforce  : Agent -> Agent -> bool;
+  gds_base_cap     : Obligation -> Severity
+}.
+
+(** The effective severity cap depends on culpability: lower
+    culpability reduces the maximum punishment.  The effective cap
+    is [base_cap * culpability_weight / max_weight], but to stay
+    in nat we use [base_cap * culpability_weight] and compare
+    against [severity * max_weight]. *)
+
+Definition effective_cap (gds : GradedDeonticSystem)
+  (o : Obligation) (c : CulpabilityLevel) : Severity :=
+  gds_base_cap gds o * culpability_weight c.
+
+(** A graded response is lawful when the severity scaled by max
+    weight does not exceed the effective cap. *)
+
+Definition graded_lawful (gds : GradedDeonticSystem)
+  (pr : PunitiveResponse) (c : CulpabilityLevel) : Prop :=
+  In (enforcer pr) (gds_agents gds) /\
+  In (target pr) (gds_agents gds) /\
+  gds_may_enforce gds (enforcer pr) (target pr) = true /\
+  gds_violated gds (target pr) (cause pr) = Some c /\
+  gds_obligated gds (target pr) (cause pr) = true /\
+  severity pr * culpability_weight Intentional <=
+    effective_cap gds (cause pr) c.
+
+(** Higher culpability permits harsher punishment. *)
+
+Theorem culpability_scales_cap :
+  forall gds o c1 c2,
+    more_culpable c1 c2 ->
+    effective_cap gds o c2 < effective_cap gds o c1 \/
+    gds_base_cap gds o = 0.
+Proof.
+  intros gds o c1 c2 Hmore.
+  unfold effective_cap, more_culpable in *.
+  destruct (gds_base_cap gds o) eqn:Hcap.
+  - right. reflexivity.
+  - left. nia.
+Qed.
+
+(** Embedding: a boolean DeonticSystem embeds into a GradedDeonticSystem
+    by treating all violations as strict liability. *)
+
+Definition embed_boolean (ds : DeonticSystem) : GradedDeonticSystem :=
+  mkGradedDeonticSystem
+    (agents ds)
+    (obligated ds)
+    (fun a o => if violated ds a o then Some Intentional else None)
+    (may_enforce ds)
+    (severity_cap ds).
+
+(** The embedding preserves lawfulness: a lawful response in the
+    boolean system is graded-lawful at Intentional (full weight)
+    in the embedded system, since boolean violation does not
+    distinguish culpability. *)
+
+Theorem embed_preserves_lawful :
+  forall ds pr,
+    lawful ds pr ->
+    graded_lawful (embed_boolean ds) pr Intentional.
+Proof.
+  intros ds pr Hlaw.
+  destruct Hlaw as [Hine Hint Henf Hviol Hobl Hbnd].
+  unfold graded_lawful, embed_boolean, effective_cap. simpl.
+  repeat split; auto.
+  - rewrite Hviol. reflexivity.
+  - lia.
+Qed.
+
+(** Converse: graded-lawful at Intentional in the embedded
+    system implies lawful in the boolean system. *)
+
+Theorem embed_reflects_lawful :
+  forall ds pr,
+    graded_lawful (embed_boolean ds) pr Intentional ->
+    lawful ds pr.
+Proof.
+  intros ds pr [Hine [Hint [Henf [Hviol [Hobl Hbnd]]]]].
+  unfold embed_boolean in *. simpl in *.
+  apply lawful_intro; auto.
+  - destruct (violated ds (target pr) (cause pr)); [reflexivity | discriminate].
+  - unfold effective_cap in Hbnd. simpl in Hbnd. lia.
+Qed.
+
+(** Witness: the homeworld system embedded with graded violations.
+    The hyperspace treaty violation by Kushan was intentional
+    (they knowingly developed hyperspace tech). *)
+
+Definition homeworld_graded : GradedDeonticSystem :=
+  mkGradedDeonticSystem
+    [taiidan; kushan]
+    (fun a o =>
+      agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace)
+    (fun a o =>
+      if agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace
+      then Some Intentional else None)
+    (fun enforcer target =>
+      agent_eqb enforcer taiidan && agent_eqb target kushan)
+    (fun o =>
+      if obligation_eqb o treaty_no_hyperspace then 10 else 0).
+
+(** With intentional violation, the effective cap is 10 * 4 = 40
+    (scaled units), permitting severity up to 40/4 = 10 in real
+    units.  A negligent violation would give effective cap 10 * 2
+    = 20, permitting severity up to 20/4 = 5. *)
+
+Lemma intentional_effective_cap :
+  effective_cap homeworld_graded treaty_no_hyperspace Intentional = 40.
+Proof.
+  unfold effective_cap, homeworld_graded. simpl. lia.
+Qed.
+
+Lemma negligent_effective_cap :
+  effective_cap homeworld_graded treaty_no_hyperspace Negligent = 20.
+Proof.
+  unfold effective_cap, homeworld_graded. simpl. lia.
+Qed.
+
+(** A severity-10 response is graded-lawful for an intentional violation
+    (10 * 4 <= 40) but NOT for a negligent violation (10 * 4 > 20). *)
+
+Lemma severity_10_lawful_intentional :
+  graded_lawful homeworld_graded
+    (mkPunitiveResponse taiidan kushan treaty_no_hyperspace 10)
+    Intentional.
+Proof.
+  unfold graded_lawful, homeworld_graded, effective_cap. simpl.
+  repeat split; auto.
+Qed.
+
+Lemma severity_10_unlawful_negligent :
+  ~ graded_lawful homeworld_graded
+      (mkPunitiveResponse taiidan kushan treaty_no_hyperspace 10)
+      Negligent.
+Proof.
+  unfold graded_lawful, homeworld_graded, effective_cap. simpl.
+  intros [_ [_ [_ [Hviol _]]]]. discriminate.
+Qed.
