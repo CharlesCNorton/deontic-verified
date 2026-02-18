@@ -1922,3 +1922,53 @@ Proof.
     destruct (agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace);
       discriminate.
 Qed.
+
+Lemma homeworld_norms_consistent :
+  modally_consistent homeworld_norms.
+Proof.
+  split.
+  - intros a o H Habs. unfold homeworld_norms in H, Habs.
+    destruct (agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace);
+      discriminate.
+  - intros a o H Habs. unfold homeworld_norms in H, Habs.
+    destruct (agent_eqb a kushan && obligation_eqb o treaty_no_hyperspace);
+      discriminate.
+Qed.
+
+(** In a grounded system, OBL entails the obligation precondition
+    for authorized enforcement: if the modality is obligatory and
+    the agent has violated, both [obligated] and [violated] hold. *)
+
+Theorem obligatory_violation_authorizable :
+  forall ds ns a o,
+    grounded ds ns ->
+    ns a o = OBL ->
+    violated ds a o = true ->
+    obligated ds a o = true /\ violated ds a o = true.
+Proof.
+  intros ds ns a o [Hobl _] Hns Hviol.
+  split.
+  - exact (Hobl a o Hns).
+  - exact Hviol.
+Qed.
+
+(** Combining modalities with lawfulness: in a grounded coherent
+    system, FORB precludes any lawful response (no violation exists
+    to punish), while OBL enables lawful responses when enforcement
+    authority and boundedness are satisfied. *)
+
+Theorem forb_precludes_lawful :
+  forall ds ns a o pr,
+    grounded ds ns ->
+    coherent ds ->
+    ns a o = FORB ->
+    target pr = a ->
+    cause pr = o ->
+    ~ lawful ds pr.
+Proof.
+  intros ds ns a o pr Hgr Hcoh Hns Htgt Hcause Hlaw.
+  assert (Hviol : violated ds a o = false)
+    by (exact (forbidden_no_violation ds ns a o Hgr Hcoh Hns)).
+  destruct Hlaw as [_ _ _ Hviol_true _ _].
+  subst. rewrite Hviol in Hviol_true. discriminate.
+Qed.
