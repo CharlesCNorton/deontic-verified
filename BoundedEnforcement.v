@@ -1596,3 +1596,39 @@ Proof.
   { exact extermination_unbounded. }
   { exact (proj2 extermination_not_lawful). }
 Qed.
+
+(** No combination of delegation, aggregation, or temporal
+    manipulation makes the extermination lawful. *)
+
+Theorem kharak_no_rearrangement :
+  (* Direct enforcement: unlawful *)
+  ~ lawful homeworld_system extermination_response /\
+  (* Delegation: delegate cap bounded by base cap (10), severity 100 exceeds it *)
+  (forall del delegator,
+    well_formed_delegation del ->
+    ds_base del = homeworld_system ->
+    delegates_to del delegator (enforcer extermination_response) = true ->
+    severity extermination_response >
+      delegate_cap del delegator (enforcer extermination_response)
+        (cause extermination_response) \/
+    severity extermination_response >
+      severity_cap homeworld_system (cause extermination_response)) /\
+  (* Aggregation: any collection containing the extermination is not all-lawful *)
+  (forall responses,
+    In extermination_response responses ->
+    ~ all_lawful homeworld_system responses) /\
+  (* Temporal: does not affect severity boundedness *)
+  (forall tobl,
+    ~ temporally_lawful homeworld_system tobl
+        (mkTemporalResponse extermination_response 3999 3999) \/
+    ~ bounded homeworld_system extermination_response).
+Proof.
+  split; [| split; [| split]].
+  - exact (proj2 extermination_not_lawful).
+  - intros del delegator Hwf Hbase Hdel.
+    right. unfold extermination_response, homeworld_system. simpl. lia.
+  - intros responses Hin.
+    apply (unbounded_member_breaks_collection homeworld_system
+             responses extermination_response Hin extermination_unbounded).
+  - right. unfold bounded, extermination_response, homeworld_system. simpl. lia.
+Qed.
